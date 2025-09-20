@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Comic Web - Home</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+        h1 {
+            color: #333;
+            text-align: center;
+        }
+        .comics-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
+            gap: 20px;
+            margin-top: 30px;
+        }
+        .comic-item {
+            background-color: white;
+            border-radius: 8px;
+            overflow: hidden;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+            transition: transform 0.3s ease;
+        }
+        .comic-item:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 5px 15px rgba(0,0,0,0.2);
+        }
+        .comic-item a {
+            text-decoration: none;
+            color: #333;
+        }
+        .comic-cover {
+            width: 100%;
+            height: 300px;
+            object-fit: cover;
+            display: block;
+        }
+        .comic-title {
+            padding: 15px;
+            text-align: center;
+            font-weight: bold;
+            font-size: 1.1em;
+        }
+        .placeholder {
+            color: #999;
+            font-style: italic;
+            text-align: center;
+            padding: 40px 20px;
+            grid-column: 1 / -1;
+        }
+        .no-cover {
+            width: 100%;
+            height: 300px;
+            background-color: #ddd;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: #999;
+            font-style: italic;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Comic Web</h1>
+        <div class="comics-grid">
+            {% if comics %}
+                {% for comic in comics %}
+                    <div class="comic-item">
+                        <a href="/comic/{{ comic.name }}">
+                            {% if comic.cover %}
+                                <img src="/comic/{{ comic.name }}/cover" alt="{{ comic.name }} cover" class="comic-cover">
+                            {% else %}
+                                <div class="no-cover">No cover image</div>
+                            {% endif %}
+                            <div class="comic-title">{{ comic.name }}</div>
+                        </a>
+                    </div>
+                {% endfor %}
+            {% else %}
+                <div class="placeholder">
+                    <p>No comics found. Add some comics to the "comics" directory to get started.</p>
+                </div>
+            {% endif %}
+        </div>
+    </div>
+</body>
+</html>

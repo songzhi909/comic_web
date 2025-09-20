@@ -1,0 +1,151 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{ comic_name }} - Comic Web</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 0;
+            background-color: #222;
+            color: white;
+        }
+        .container {
+            max-width: 100%;
+            margin: 0 auto;
+        }
+        .header {
+            background-color: #333;
+            padding: 15px 20px;
+            position: sticky;
+            top: 0;
+            z-index: 100;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .comic-title {
+            margin: 0;
+            font-size: 1.2em;
+        }
+        .back-link {
+            color: #4da6ff;
+            text-decoration: none;
+        }
+        .back-link:hover {
+            text-decoration: underline;
+        }
+        .images-container {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding: 20px 0;
+        }
+        .comic-image {
+            max-width: 98%;
+            margin-bottom: 10px;
+            box-shadow: 0 0 10px rgba(0,0,0,0.5);
+            display: block;
+        }
+        .loading {
+            color: #999;
+            font-style: italic;
+            text-align: center;
+            padding: 20px;
+        }
+        .hidden {
+            display: none;
+        }
+        #loading-indicator {
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
+            background-color: rgba(0,0,0,0.7);
+            padding: 10px 15px;
+            border-radius: 5px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h2 class="comic-title">{{ comic_name }}</h2>
+            <a href="/" class="back-link">← Back to Comics</a>
+        </div>
+        <div class="images-container" id="images-container">
+            <!-- Images will be loaded here dynamically -->
+        </div>
+        <div id="loading-indicator" class="hidden">Loading more images...</div>
+    </div>
+
+    <script>
+        // Configuration
+        const COMIC_NAME = "{{ comic_name }}";
+        const TOTAL_IMAGES = {{ total_images }};
+        const IMAGES_PER_LOAD = 20;
+        
+        // State variables
+        let currentPage = 1;
+        let isLoading = false;
+        let hasMore = true;
+        
+        // DOM elements
+        const imagesContainer = document.getElementById('images-container');
+        const loadingIndicator = document.getElementById('loading-indicator');
+        
+        // Load images function
+        async function loadImages(page) {
+            if (isLoading || !hasMore) return;
+            
+            isLoading = true;
+            loadingIndicator.classList.remove('hidden');
+            
+            try {
+                const response = await fetch(`/api/comic/${COMIC_NAME}/images?page=${page}`);
+                const data = await response.json();
+                
+                if (data.error) {
+                    console.error('Error loading images:', data.error);
+                    return;
+                }
+                
+                // Add images to container
+                data.images.forEach(imageUrl => {
+                    const img = document.createElement('img');
+                    img.src = imageUrl;
+                    img.className = 'comic-image';
+                    img.loading = 'lazy'; // Native lazy loading
+                    imagesContainer.appendChild(img);
+                });
+                
+                hasMore = data.has_more;
+                currentPage++;
+                
+            } catch (error) {
+                console.error('Error loading images:', error);
+            } finally {
+                isLoading = false;
+                loadingIndicator.classList.add('hidden');
+            }
+        }
+        
+        // Check if we need to load more images
+        function checkScroll() {
+            // If we're near the bottom of the page, load more images
+            if ((window.innerHeight + window.scrollY) >= document.body.offsetHeight - 1000) {
+                loadImages(currentPage);
+            }
+        }
+        
+        // Initial load
+        document.addEventListener('DOMContentLoaded', () => {
+            loadImages(currentPage);
+            
+            // Add scroll event listener for lazy loading
+            window.addEventListener('scroll', checkScroll);
+        });
+    </script>
+</body>
+</html>
