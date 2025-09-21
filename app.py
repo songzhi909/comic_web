@@ -1,12 +1,27 @@
 import os
+import sys
 from flask import Flask, render_template, jsonify, send_from_directory, request
 from flask_cors import CORS
 
-app = Flask(__name__)
+# Determine if we're running in a PyInstaller bundle
+if getattr(sys, 'frozen', False):
+    # Running as compiled executable
+    template_folder = os.path.join(sys._MEIPASS, 'templates')
+    static_folder = os.path.join(sys._MEIPASS, 'static')
+    # Comics directory should always be alongside the executable
+    exe_dir = os.path.dirname(sys.executable)
+    comics_dir = os.path.join(exe_dir, 'comics')
+    app = Flask(__name__, template_folder=template_folder, static_folder=static_folder)
+else:
+    # Running in development (Python interpreter)
+    app = Flask(__name__)
+    # Comics directory is alongside the script file
+    comics_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'comics')
+
 CORS(app)
 
 # Configuration
-COMICS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'comics')
+COMICS_DIR = comics_dir
 IMAGES_PER_LOAD = 20
 
 def get_comic_images(comic_name):
@@ -41,6 +56,8 @@ def index():
     """
     Main page showing list of comics with cover images
     """
+    # Ensure the comics directory exists. This will create it on first run
+    # if it doesn't already exist.
     if not os.path.exists(COMICS_DIR):
         os.makedirs(COMICS_DIR)
     
