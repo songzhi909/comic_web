@@ -1,0 +1,3 @@
+"""
+Comic Web Application Package
+"""
