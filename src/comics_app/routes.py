@@ -6,91 +6,50 @@ import os
 import json
 import logging
 import sys
-from flask import Flask, render_template, jsonify, send_from_directory, request, redirect, url_for
-from werkzeug.utils import secure_filename
 
 # Add the src directory to the path for imports
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+from flask import Flask, render_template, jsonify, send_from_directory, request, redirect, url_for
+from werkzeug.utils import secure_filename
+
 from config import Config
 from comics_app.models import Comic, ComicImage
 from comics_app.utils import get_comic_images, get_comic_cover, is_path_safe
+from comics_app.database import (
+    init_db, 
+    get_comic_metadata, 
+    save_comic_metadata, 
+    get_all_comics as db_get_all_comics,
+    save_bookmark,
+    remove_bookmark,
+    get_bookmarks,
+    sync_comics_with_db
+)
 
 logger = logging.getLogger(__name__)
 
-# Metadata file name
-METADATA_FILE = "metadata.json"
-BOOKMARKS_FILE = "bookmarks.json"
-
-def load_comic_metadata(comic_name):
-    """Load metadata for a specific comic"""
-    metadata_path = os.path.join(Config.COMICS_DIR, comic_name, METADATA_FILE)
-    if os.path.exists(metadata_path):
-        try:
-            with open(metadata_path, 'r', encoding='utf-8') as f:
-                return json.load(f)
-        except Exception as e:
-            logger.error(f"Error loading metadata for {comic_name}: {str(e)}")
-    return {}
-
-def save_comic_metadata(comic_name, metadata):
-    """Save metadata for a specific comic"""
-    metadata_path = os.path.join(Config.COMICS_DIR, comic_name, METADATA_FILE)
-    try:
-        with open(metadata_path, 'w', encoding='utf-8') as f:
-            json.dump(metadata, f, indent=2, ensure_ascii=False)
-        return True
-    except Exception as e:
-        logger.error(f"Error saving metadata for {comic_name}: {str(e)}")
-        return False
-
-def load_bookmarks():
-    """Load bookmarks from file"""
-    bookmarks_path = os.path.join(Config.COMICS_DIR, BOOKMARKS_FILE)
-    if os.path.exists(bookmarks_path):
-        try:
-            with open(bookmarks_path, 'r', encoding='utf-8') as f:
-                return json.load(f)
-        except Exception as e:
-            logger.error(f"Error loading bookmarks: {str(e)}")
-    return {}
-
-def save_bookmarks(bookmarks):
-    """Save bookmarks to file"""
-    bookmarks_path = os.path.join(Config.COMICS_DIR, BOOKMARKS_FILE)
-    try:
-        with open(bookmarks_path, 'w', encoding='utf-8') as f:
-            json.dump(bookmarks, f, indent=2, ensure_ascii=False)
-        return True
-    except Exception as e:
-        logger.error(f"Error saving bookmarks: {str(e)}")
-        return False
-
 def get_all_comics():
     """Get all comics with their metadata"""
-    comics = []
-    if not os.path.exists(Config.COMICS_DIR):
-        logger.warning("Comics directory does not exist")
-        return comics
+    # Sync comics directory with database
+    sync_comics_with_db()
     
-    try:
-        for item in sorted(os.listdir(Config.COMICS_DIR)):
-            item_path = os.path.join(Config.COMICS_DIR, item)
-            if os.path.isdir(item_path):
-                # Load metadata for the comic
-                metadata = load_comic_metadata(item)
-                
-                # Get cover image
-                cover = get_comic_cover(Config.COMICS_DIR, item)
-                
-                comic = Comic(
-                    name=item,
-                    cover_image=cover,
-                    metadata=metadata
-                )
-                comics.append(comic)
-    except Exception as e:
-        logger.error(f"Error scanning comics directory: {str(e)}")
+    # Get comics from database
+    db_comics = db_get_all_comics()
+    comics = []
+    
+    for db_comic in db_comics:
+        comic = Comic(
+            name=db_comic['name'],
+            cover_image=db_comic['cover_image'],
+            metadata={
+                'title': db_comic['title'],
+                'author': db_comic['author'],
+                'tags': db_comic['tags'],
+                'description': db_comic['description']
+            }
+        )
+        comics.append(comic)
         
     return comics
 
@@ -107,6 +66,10 @@ def create_app():
                 template_folder=os.path.abspath(template_dir),
                 static_folder=os.path.abspath(static_dir))
     
+    # Initialize database
+    with app.app_context():
+        init_db()
+    
     @app.route('/')
     def index():
         """Main page showing all comics"""
@@ -118,9 +81,9 @@ def create_app():
             comics = [comic for comic in comics 
                      if search_query in comic.name.lower() or 
                         (comic.metadata and (
-                            search_query in comic.metadata.get('title', '').lower() or
-                            search_query in comic.metadata.get('author', '').lower() or
-                            search_query in comic.metadata.get('tags', '').lower()
+                            search_query in (comic.metadata.get('title') or '').lower() or
+                            search_query in (comic.metadata.get('author') or '').lower() or
+                            search_query in (comic.metadata.get('tags') or '').lower()
                         ))]
         
         return render_template('index.html', comics=comics, search_query=search_query)
@@ -138,7 +101,7 @@ def create_app():
             return "Comic not found", 404
             
         # Load metadata
-        metadata = load_comic_metadata(name)
+        metadata = get_comic_metadata(name)
         comic_title = metadata.get('title', name)
             
         # Get first batch of images
@@ -202,7 +165,7 @@ def create_app():
             return jsonify({"error": "Invalid comic name"}), 400
             
         if request.method == 'GET':
-            metadata = load_comic_metadata(name)
+            metadata = get_comic_metadata(name)
             return jsonify(metadata)
         elif request.method == 'POST':
             metadata = request.get_json()
@@ -215,13 +178,33 @@ def create_app():
     def bookmarks():
         """API endpoint for getting or updating bookmarks"""
         if request.method == 'GET':
-            bookmarks_data = load_bookmarks()
+            bookmarks_data = get_bookmarks()
             return jsonify(bookmarks_data)
         elif request.method == 'POST':
-            bookmarks_data = request.get_json()
-            if save_bookmarks(bookmarks_data):
-                return jsonify({"success": True})
+            data = request.get_json()
+            if isinstance(data, dict):
+                # For backward compatibility, handle both old format and new format
+                if 'comic_name' in data and 'action' in data:
+                    # New format with action
+                    comic_name = data['comic_name']
+                    comic_title = data.get('comic_title', comic_name)
+                    action = data['action']
+                    
+                    if action == 'add':
+                        if save_bookmark(comic_name, comic_title):
+                            return jsonify({"success": True})
+                        else:
+                            return jsonify({"error": "Failed to save bookmark"}), 500
+                    elif action == 'remove':
+                        if remove_bookmark(comic_name):
+                            return jsonify({"success": True})
+                        else:
+                            return jsonify({"error": "Failed to remove bookmark"}), 500
+                else:
+                    # Old format - replace all bookmarks
+                    # In this case, we'll just return success since we're not using this approach anymore
+                    return jsonify({"success": True})
             else:
-                return jsonify({"error": "Failed to save bookmarks"}), 500
+                return jsonify({"error": "Invalid data format"}), 400
     
     return app

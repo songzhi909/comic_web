@@ -189,19 +189,19 @@
             <form id="metadata-form">
                 <div class="form-group">
                     <label for="title">Title:</label>
-                    <input type="text" id="title" name="title">
+                    <input type="text" id="title" name="title" value="{{ request.args.get('title', '') }}">
                 </div>
                 <div class="form-group">
                     <label for="author">Author:</label>
-                    <input type="text" id="author" name="author">
+                    <input type="text" id="author" name="author" value="{{ request.args.get('author', '') }}">
                 </div>
                 <div class="form-group">
                     <label for="tags">Tags (comma separated):</label>
-                    <input type="text" id="tags" name="tags">
+                    <input type="text" id="tags" name="tags" value="{{ request.args.get('tags', '') }}">
                 </div>
                 <div class="form-group">
                     <label for="description">Description:</label>
-                    <textarea id="description" name="description"></textarea>
+                    <textarea id="description" name="description">{{ request.args.get('description', '') }}</textarea>
                 </div>
                 <div class="form-actions">
                     <button type="button" class="btn cancel">Cancel</button>
@@ -216,9 +216,9 @@
         let currentPage = 1;
         let isLoading = false;
         let hasMore = true;
-        let bookmarks = {};
         let totalImages = {{ total_images }};
-        let imagesPerLoad = 20; // Should match Config.IMAGES_PER_LOAD
+        let bookmarks = {};
+        let comicMetadata = {};
         
         // DOM elements
         const imagesContainer = document.getElementById('images-container');
@@ -301,37 +301,42 @@
         
         // Toggle bookmark for current comic
         function toggleBookmark() {
-            if (!bookmarks) {
-                bookmarks = {};
-            }
+            const isBookmarked = bookmarks && bookmarks['{{ comic_name }}'];
             
-            if (bookmarks['{{ comic_name }}']) {
-                delete bookmarks['{{ comic_name }}'];
-            } else {
-                bookmarks['{{ comic_name }}'] = {
-                    title: '{{ comic_title }}',
-                    timestamp: new Date().toISOString()
-                };
-            }
+            const action = isBookmarked ? 'remove' : 'add';
+            const comicTitle = comicMetadata.title || '{{ comic_title }}';
             
-            // Save bookmarks to server
+            // Save bookmark to server
             fetch('/api/bookmarks', {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json'
                 },
-                body: JSON.stringify(bookmarks)
+                body: JSON.stringify({
+                    comic_name: '{{ comic_name }}',
+                    comic_title: comicTitle,
+                    action: action
+                })
             })
             .then(response => response.json())
             .then(data => {
                 if (data.success) {
+                    // Update local bookmarks state
+                    if (isBookmarked) {
+                        delete bookmarks['{{ comic_name }}'];
+                    } else {
+                        bookmarks['{{ comic_name }}'] = {
+                            title: comicTitle,
+                            timestamp: new Date().toISOString()
+                        };
+                    }
                     updateBookmarkButton();
                 } else {
-                    console.error('Failed to save bookmarks');
+                    console.error('Failed to update bookmark');
                 }
             })
             .catch(error => {
-                console.error('Error saving bookmarks:', error);
+                console.error('Error updating bookmark:', error);
             });
         }
         

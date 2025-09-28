@@ -9,10 +9,14 @@ import os
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from comics_app.routes import create_app
+from comics_app.database import init_db
 from log_config import setup_logging
 
 # Setup logging
 logger = setup_logging()
+
+# Initialize database
+init_db()
 
 # Create the Flask application
 app = create_app()
