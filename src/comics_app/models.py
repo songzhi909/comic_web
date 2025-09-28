@@ -6,9 +6,10 @@ class Comic:
     """
     Represents a comic in the system
     """
-    def __init__(self, name, cover_image=None):
+    def __init__(self, name, cover_image=None, metadata=None):
         self.name = name
         self.cover_image = cover_image
+        self.metadata = metadata if metadata else {}
 
 class ComicImage:
     """

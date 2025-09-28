@@ -68,3 +68,31 @@ def is_path_safe(path_segment):
         bool: True if path is safe, False otherwise
     """
     return '..' not in path_segment and not path_segment.startswith('/')
+
+def search_comics(comics_dir, query):
+    """
+    Search for comics by name or metadata
+    
+    Args:
+        comics_dir (str): Path to the comics directory
+        query (str): Search query
+        
+    Returns:
+        list: List of comic names that match the query
+    """
+    # This function would be better placed in routes.py with access to metadata
+    # For now, we'll implement basic name-based search
+    matching_comics = []
+    
+    if not os.path.exists(comics_dir):
+        return matching_comics
+    
+    try:
+        for item in os.listdir(comics_dir):
+            item_path = os.path.join(comics_dir, item)
+            if os.path.isdir(item_path) and query.lower() in item.lower():
+                matching_comics.append(item)
+    except Exception as e:
+        logger.error(f"Error searching comics: {str(e)}")
+    
+    return matching_comics

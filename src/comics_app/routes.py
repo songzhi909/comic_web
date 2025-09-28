@@ -3,172 +3,225 @@ Routes for the Comic Web application
 """
 
 import os
-import sys
+import json
 import logging
-from flask import Flask, render_template, jsonify, send_from_directory, request
-from flask_cors import CORS
+import sys
+from flask import Flask, render_template, jsonify, send_from_directory, request, redirect, url_for
+from werkzeug.utils import secure_filename
 
 # Add the src directory to the path for imports
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from comics_app.utils import get_comic_images, get_comic_cover, is_path_safe
-from comics_app.models import Comic
 from config import Config
+from comics_app.models import Comic, ComicImage
+from comics_app.utils import get_comic_images, get_comic_cover, is_path_safe
 
 logger = logging.getLogger(__name__)
 
-def create_app():
-    """
-    Create and configure the Flask application
-    
-    Returns:
-        Flask: Configured Flask application
-    """
-    # Create Flask app with appropriate template and static folders
-    if Config.TEMPLATE_FOLDER and Config.STATIC_FOLDER:
-        app = Flask(__name__, 
-                   template_folder=Config.TEMPLATE_FOLDER, 
-                   static_folder=Config.STATIC_FOLDER)
-    else:
-        app = Flask(__name__)
-    
-    # Enable CORS
-    CORS(app)
-    
-    # Register routes
-    register_routes(app)
-    
-    return app
+# Metadata file name
+METADATA_FILE = "metadata.json"
+BOOKMARKS_FILE = "bookmarks.json"
 
-def register_routes(app):
-    """
-    Register all routes with the Flask application
+def load_comic_metadata(comic_name):
+    """Load metadata for a specific comic"""
+    metadata_path = os.path.join(Config.COMICS_DIR, comic_name, METADATA_FILE)
+    if os.path.exists(metadata_path):
+        try:
+            with open(metadata_path, 'r', encoding='utf-8') as f:
+                return json.load(f)
+        except Exception as e:
+            logger.error(f"Error loading metadata for {comic_name}: {str(e)}")
+    return {}
+
+def save_comic_metadata(comic_name, metadata):
+    """Save metadata for a specific comic"""
+    metadata_path = os.path.join(Config.COMICS_DIR, comic_name, METADATA_FILE)
+    try:
+        with open(metadata_path, 'w', encoding='utf-8') as f:
+            json.dump(metadata, f, indent=2, ensure_ascii=False)
+        return True
+    except Exception as e:
+        logger.error(f"Error saving metadata for {comic_name}: {str(e)}")
+        return False
+
+def load_bookmarks():
+    """Load bookmarks from file"""
+    bookmarks_path = os.path.join(Config.COMICS_DIR, BOOKMARKS_FILE)
+    if os.path.exists(bookmarks_path):
+        try:
+            with open(bookmarks_path, 'r', encoding='utf-8') as f:
+                return json.load(f)
+        except Exception as e:
+            logger.error(f"Error loading bookmarks: {str(e)}")
+    return {}
+
+def save_bookmarks(bookmarks):
+    """Save bookmarks to file"""
+    bookmarks_path = os.path.join(Config.COMICS_DIR, BOOKMARKS_FILE)
+    try:
+        with open(bookmarks_path, 'w', encoding='utf-8') as f:
+            json.dump(bookmarks, f, indent=2, ensure_ascii=False)
+        return True
+    except Exception as e:
+        logger.error(f"Error saving bookmarks: {str(e)}")
+        return False
+
+def get_all_comics():
+    """Get all comics with their metadata"""
+    comics = []
+    if not os.path.exists(Config.COMICS_DIR):
+        logger.warning("Comics directory does not exist")
+        return comics
     
-    Args:
-        app (Flask): Flask application instance
-    """
+    try:
+        for item in sorted(os.listdir(Config.COMICS_DIR)):
+            item_path = os.path.join(Config.COMICS_DIR, item)
+            if os.path.isdir(item_path):
+                # Load metadata for the comic
+                metadata = load_comic_metadata(item)
+                
+                # Get cover image
+                cover = get_comic_cover(Config.COMICS_DIR, item)
+                
+                comic = Comic(
+                    name=item,
+                    cover_image=cover,
+                    metadata=metadata
+                )
+                comics.append(comic)
+    except Exception as e:
+        logger.error(f"Error scanning comics directory: {str(e)}")
+        
+    return comics
+
+def create_app():
+    """Create and configure the Flask application"""
+    # Get the project root directory
+    project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    
+    # Set template and static folders explicitly with absolute paths
+    template_dir = os.path.join(project_root, '..', 'templates')
+    static_dir = os.path.join(project_root, '..', 'static')
+    
+    app = Flask(__name__, 
+                template_folder=os.path.abspath(template_dir),
+                static_folder=os.path.abspath(static_dir))
     
     @app.route('/')
     def index():
-        """
-        Main page showing list of comics with cover images
-        """
-        logger.info("Accessing main page")
+        """Main page showing all comics"""
+        search_query = request.args.get('search', '').lower()
+        comics = get_all_comics()
         
-        # Ensure the comics directory exists. This will create it on first run
-        # if it doesn't already exist.
-        if not os.path.exists(Config.COMICS_DIR):
-            os.makedirs(Config.COMICS_DIR)
-            logger.info(f"Created comics directory: {Config.COMICS_DIR}")
+        # Apply search filter if provided
+        if search_query:
+            comics = [comic for comic in comics 
+                     if search_query in comic.name.lower() or 
+                        (comic.metadata and (
+                            search_query in comic.metadata.get('title', '').lower() or
+                            search_query in comic.metadata.get('author', '').lower() or
+                            search_query in comic.metadata.get('tags', '').lower()
+                        ))]
         
-        comics = []
-        if os.path.exists(Config.COMICS_DIR):
-            for d in os.listdir(Config.COMICS_DIR):
-                if os.path.isdir(os.path.join(Config.COMICS_DIR, d)):
-                    cover_image = get_comic_cover(Config.COMICS_DIR, d)
-                    comics.append({
-                        'name': d,
-                        'cover': cover_image
-                    })
-            logger.info(f"Found {len(comics)} comics in directory")
-        else:
-            logger.warning(f"Comics directory does not exist: {Config.COMICS_DIR}")
-        
-        return render_template('index.html', comics=comics)
+        return render_template('index.html', comics=comics, search_query=search_query)
     
-    @app.route('/comic/<comic_name>')
-    def view_comic(comic_name):
-        """
-        View a specific comic
-        """
-        logger.info(f"Accessing comic: {comic_name}")
-        
-        # Sanitize comic name to prevent directory traversal
-        if not is_path_safe(comic_name):
-            logger.warning(f"Invalid comic name attempted: {comic_name}")
+    @app.route('/comic/<name>')
+    def comic(name):
+        """Page for viewing a specific comic"""
+        if not is_path_safe(name):
+            logger.warning(f"Unsafe path attempt: {name}")
             return "Invalid comic name", 400
+            
+        comic_path = os.path.join(Config.COMICS_DIR, name)
+        if not os.path.exists(comic_path):
+            logger.warning(f"Comic not found: {name}")
+            return "Comic not found", 404
+            
+        # Load metadata
+        metadata = load_comic_metadata(name)
+        comic_title = metadata.get('title', name)
+            
+        # Get first batch of images
+        all_images = get_comic_images(Config.COMICS_DIR, name)
+        initial_images = all_images[:Config.IMAGES_PER_LOAD]
         
-        images = get_comic_images(Config.COMICS_DIR, comic_name)
-        if not images:
-            logger.warning(f"No images found for comic: {comic_name}")
-            return "No images found for this comic", 404
-        
-        logger.info(f"Displaying comic {comic_name} with {len(images)} images")
-        return render_template('comic.html', comic_name=comic_name, total_images=len(images))
+        return render_template('comic.html', 
+                             comic_name=name,
+                             comic_title=comic_title,
+                             images=initial_images,
+                             total_images=len(all_images))
     
-    @app.route('/api/comic/<comic_name>/images')
-    def api_comic_images(comic_name):
-        """
-        API endpoint to get comic images with pagination
-        """
-        logger.info(f"API request for images of comic: {comic_name}")
-        
-        # Sanitize comic name to prevent directory traversal
-        if not is_path_safe(comic_name):
-            logger.warning(f"Invalid comic name in API request: {comic_name}")
-            return jsonify({'error': 'Invalid comic name'}), 400
-        
+    @app.route('/api/comic/<name>/images')
+    def api_comic_images(name):
+        """API endpoint for getting comic images with pagination"""
+        if not is_path_safe(name):
+            return jsonify({"error": "Invalid comic name"}), 400
+            
         page = int(request.args.get('page', 1))
-        logger.info(f"Loading page {page} for comic: {comic_name}")
+        all_images = get_comic_images(Config.COMICS_DIR, name)
         
-        images = get_comic_images(Config.COMICS_DIR, comic_name)
+        start_idx = (page - 1) * Config.IMAGES_PER_LOAD
+        end_idx = start_idx + Config.IMAGES_PER_LOAD
         
-        if not images:
-            logger.warning(f"No images found for comic in API: {comic_name}")
-            return jsonify({'error': 'No images found'}), 404
-        
-        start_index = (page - 1) * Config.IMAGES_PER_LOAD
-        end_index = start_index + Config.IMAGES_PER_LOAD
-        
-        # Slice images for current page
-        images_slice = images[start_index:end_index]
-        
-        # Prepare image URLs
-        image_urls = [f'/comic/{comic_name}/image/{img}' for img in images_slice]
-        
-        logger.info(f"Returning {len(image_urls)} images for page {page} of {comic_name}")
+        images_batch = all_images[start_idx:end_idx]
         
         return jsonify({
-            'images': image_urls,
-            'has_more': end_index < len(images),
-            'total': len(images)
+            "images": images_batch,
+            "has_more": end_idx < len(all_images),
+            "total": len(all_images)
         })
     
-    @app.route('/comic/<comic_name>/image/<path:filename>')
-    def serve_comic_image(comic_name, filename):
-        """
-        Serve a specific comic image
-        """
-        logger.info(f"Serving image: {filename} from comic: {comic_name}")
-        
-        # Sanitize inputs to prevent directory traversal
-        if not is_path_safe(comic_name) or not is_path_safe(filename):
-            logger.warning(f"Invalid path attempted - comic: {comic_name}, file: {filename}")
+    @app.route('/comic/<name>/image/<filename>')
+    def comic_image(name, filename):
+        """Serve a specific comic image"""
+        if not is_path_safe(name) or not is_path_safe(filename):
+            logger.warning(f"Unsafe path attempt: {name}/{filename}")
             return "Invalid path", 400
-        
-        comic_path = os.path.join(Config.COMICS_DIR, comic_name)
-        logger.info(f"Serving image from path: {comic_path}")
+            
+        comic_path = os.path.join(Config.COMICS_DIR, name)
         return send_from_directory(comic_path, filename)
     
-    # New route to serve comic cover images
-    @app.route('/comic/<comic_name>/cover')
-    def serve_comic_cover(comic_name):
-        """
-        Serve the cover image for a comic (first image in directory)
-        """
-        logger.info(f"Serving cover for comic: {comic_name}")
-        
-        # Sanitize inputs to prevent directory traversal
-        if not is_path_safe(comic_name):
-            logger.warning(f"Invalid comic name for cover request: {comic_name}")
-            return "Invalid path", 400
-        
-        cover_image = get_comic_cover(Config.COMICS_DIR, comic_name)
-        if not cover_image:
-            # Return a default "no cover" image or 404
-            logger.warning(f"No cover image found for comic: {comic_name}")
-            return "No cover image found", 404
-        
-        comic_path = os.path.join(Config.COMICS_DIR, comic_name)
-        logger.info(f"Serving cover image from path: {comic_path}")
-        return send_from_directory(comic_path, cover_image)
+    @app.route('/comic/<name>/cover')
+    def comic_cover(name):
+        """Serve the cover image for a comic"""
+        if not is_path_safe(name):
+            logger.warning(f"Unsafe path attempt: {name}")
+            return "Invalid comic name", 400
+            
+        cover = get_comic_cover(Config.COMICS_DIR, name)
+        if not cover:
+            return "Cover not found", 404
+            
+        comic_path = os.path.join(Config.COMICS_DIR, name)
+        return send_from_directory(comic_path, cover)
+    
+    @app.route('/api/comic/<name>/metadata', methods=['GET', 'POST'])
+    def comic_metadata(name):
+        """API endpoint for getting or updating comic metadata"""
+        if not is_path_safe(name):
+            return jsonify({"error": "Invalid comic name"}), 400
+            
+        if request.method == 'GET':
+            metadata = load_comic_metadata(name)
+            return jsonify(metadata)
+        elif request.method == 'POST':
+            metadata = request.get_json()
+            if save_comic_metadata(name, metadata):
+                return jsonify({"success": True})
+            else:
+                return jsonify({"error": "Failed to save metadata"}), 500
+    
+    @app.route('/api/bookmarks', methods=['GET', 'POST'])
+    def bookmarks():
+        """API endpoint for getting or updating bookmarks"""
+        if request.method == 'GET':
+            bookmarks_data = load_bookmarks()
+            return jsonify(bookmarks_data)
+        elif request.method == 'POST':
+            bookmarks_data = request.get_json()
+            if save_bookmarks(bookmarks_data):
+                return jsonify({"success": True})
+            else:
+                return jsonify({"error": "Failed to save bookmarks"}), 500
+    
+    return app

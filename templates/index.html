@@ -19,6 +19,30 @@
             color: #333;
             text-align: center;
         }
+        .search-container {
+            text-align: center;
+            margin-bottom: 20px;
+        }
+        .search-container input {
+            padding: 10px;
+            width: 300px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            font-size: 16px;
+        }
+        .search-container button {
+            padding: 10px 20px;
+            background-color: #007bff;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 16px;
+            margin-left: 10px;
+        }
+        .search-container button:hover {
+            background-color: #0056b3;
+        }
         .comics-grid {
             display: grid;
             grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
@@ -52,6 +76,23 @@
             font-weight: bold;
             font-size: 1.1em;
         }
+        .comic-metadata {
+            padding: 0 15px 15px 15px;
+            font-size: 0.9em;
+            color: #666;
+        }
+        .comic-tags {
+            padding: 0 15px 15px 15px;
+            font-size: 0.8em;
+            color: #888;
+        }
+        .tag {
+            display: inline-block;
+            background-color: #e9ecef;
+            border-radius: 12px;
+            padding: 2px 8px;
+            margin-right: 5px;
+        }
         .placeholder {
             color: #999;
             font-style: italic;
@@ -74,26 +115,58 @@
 <body>
     <div class="container">
         <h1>Comic Web</h1>
+        
+        <div class="search-container">
+            <form id="search-form">
+                <input type="text" id="search-input" name="search" placeholder="Search comics..." value="{{ search_query }}">
+                <button type="submit">Search</button>
+            </form>
+        </div>
+        
         <div class="comics-grid">
             {% if comics %}
                 {% for comic in comics %}
                     <div class="comic-item">
                         <a href="/comic/{{ comic.name }}">
-                            {% if comic.cover %}
+                            {% if comic.cover_image %}
                                 <img src="/comic/{{ comic.name }}/cover" alt="{{ comic.name }} cover" class="comic-cover">
                             {% else %}
                                 <div class="no-cover">No cover image</div>
                             {% endif %}
-                            <div class="comic-title">{{ comic.name }}</div>
+                            <div class="comic-title">
+                                {{ comic.metadata.title if comic.metadata.title else comic.name }}
+                            </div>
+                            {% if comic.metadata.author %}
+                                <div class="comic-metadata">
+                                    by {{ comic.metadata.author }}
+                                </div>
+                            {% endif %}
+                            {% if comic.metadata.tags %}
+                                <div class="comic-tags">
+                                    {% for tag in comic.metadata.tags.split(',') %}
+                                        <span class="tag">{{ tag.strip() }}</span>
+                                    {% endfor %}
+                                </div>
+                            {% endif %}
                         </a>
                     </div>
                 {% endfor %}
             {% else %}
                 <div class="placeholder">
                     <p>No comics found. Add some comics to the "comics" directory to get started.</p>
+                    {% if search_query %}
+                        <p><i>No comics matched your search for "{{ search_query }}". Try a different search term.</i></p>
+                    {% endif %}
                 </div>
             {% endif %}
         </div>
     </div>
+    
+    <script>
+        // Focus the search input on page load
+        document.addEventListener('DOMContentLoaded', function() {
+            document.getElementById('search-input').focus();
+        });
+    </script>
 </body>
 </html>

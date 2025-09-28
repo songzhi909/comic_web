@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>{{ comic_name }} - Comic Web</title>
+    <title>{{ comic_title }} - Comic Web</title>
     <style>
         body {
             font-family: Arial, sans-serif;
@@ -25,6 +25,7 @@
             display: flex;
             justify-content: space-between;
             align-items: center;
+            flex-wrap: wrap;
         }
         .comic-title {
             margin: 0;
@@ -37,6 +38,40 @@
         .back-link:hover {
             text-decoration: underline;
         }
+        .controls {
+            display: flex;
+            gap: 10px;
+            margin-top: 10px;
+            width: 100%;
+        }
+        .btn {
+            padding: 8px 16px;
+            background-color: #007bff;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 0.9em;
+        }
+        .btn:hover {
+            background-color: #0056b3;
+        }
+        .btn.bookmark {
+            background-color: #28a745;
+        }
+        .btn.bookmark:hover {
+            background-color: #1e7e34;
+        }
+        .btn.bookmark.active {
+            background-color: #ffc107;
+            color: #212529;
+        }
+        .metadata-btn {
+            background-color: #6c757d;
+        }
+        .metadata-btn:hover {
+            background-color: #5a6268;
+        }
         .images-container {
             display: flex;
             flex-direction: column;
@@ -44,7 +79,7 @@
             padding: 20px 0;
         }
         .comic-image {
-            max-width: 98%;
+            max-width: 95%;
             margin-bottom: 10px;
             box-shadow: 0 0 10px rgba(0,0,0,0.5);
             display: block;
@@ -52,100 +87,343 @@
         .loading {
             color: #999;
             font-style: italic;
-            text-align: center;
             padding: 20px;
         }
-        .hidden {
+        .modal {
             display: none;
-        }
-        #loading-indicator {
             position: fixed;
-            bottom: 20px;
-            right: 20px;
-            background-color: rgba(0,0,0,0.7);
-            padding: 10px 15px;
-            border-radius: 5px;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0,0,0,0.8);
+            z-index: 1000;
+            justify-content: center;
+            align-items: center;
+        }
+        .modal-content {
+            background-color: #333;
+            padding: 20px;
+            border-radius: 8px;
+            max-width: 500px;
+            width: 90%;
+            max-height: 90%;
+            overflow-y: auto;
+        }
+        .modal-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 15px;
+        }
+        .close {
+            font-size: 1.5em;
+            cursor: pointer;
+        }
+        .form-group {
+            margin-bottom: 15px;
+        }
+        .form-group label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: bold;
+        }
+        .form-group input, .form-group textarea {
+            width: 100%;
+            padding: 8px;
+            border-radius: 4px;
+            border: 1px solid #555;
+            background-color: #444;
+            color: white;
+        }
+        .form-group textarea {
+            height: 80px;
+            resize: vertical;
+        }
+        .form-actions {
+            display: flex;
+            justify-content: flex-end;
+            gap: 10px;
+            margin-top: 20px;
+        }
+        .btn.cancel {
+            background-color: #6c757d;
+        }
+        .btn.cancel:hover {
+            background-color: #5a6268;
+        }
+        .btn.save {
+            background-color: #28a745;
+        }
+        .btn.save:hover {
+            background-color: #1e7e34;
         }
     </style>
 </head>
 <body>
     <div class="container">
         <div class="header">
-            <h2 class="comic-title">{{ comic_name }}</h2>
+            <h1 class="comic-title">{{ comic_title }}</h1>
             <a href="/" class="back-link">← Back to Comics</a>
+            
+            <div class="controls">
+                <button id="bookmark-btn" class="btn bookmark">Bookmark</button>
+                <button id="metadata-btn" class="btn metadata-btn">Edit Metadata</button>
+            </div>
         </div>
-        <div class="images-container" id="images-container">
-            <!-- Images will be loaded here dynamically -->
-        </div>
-        <div id="loading-indicator" class="hidden">Loading more images...</div>
-    </div>
-
-    <script>
-        // Configuration
-        const COMIC_NAME = "{{ comic_name }}";
-        const TOTAL_IMAGES = {{ total_images }};
-        const IMAGES_PER_LOAD = 20;
         
-        // State variables
+        <div class="images-container" id="images-container">
+            {% for image in images %}
+                <img src="/comic/{{ comic_name }}/image/{{ image }}" alt="{{ image }}" class="comic-image" loading="lazy">
+            {% endfor %}
+        </div>
+    </div>
+    
+    <!-- Metadata Modal -->
+    <div id="metadata-modal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>Edit Metadata</h2>
+                <span class="close">&times;</span>
+            </div>
+            <form id="metadata-form">
+                <div class="form-group">
+                    <label for="title">Title:</label>
+                    <input type="text" id="title" name="title">
+                </div>
+                <div class="form-group">
+                    <label for="author">Author:</label>
+                    <input type="text" id="author" name="author">
+                </div>
+                <div class="form-group">
+                    <label for="tags">Tags (comma separated):</label>
+                    <input type="text" id="tags" name="tags">
+                </div>
+                <div class="form-group">
+                    <label for="description">Description:</label>
+                    <textarea id="description" name="description"></textarea>
+                </div>
+                <div class="form-actions">
+                    <button type="button" class="btn cancel">Cancel</button>
+                    <button type="submit" class="btn save">Save</button>
+                </div>
+            </form>
+        </div>
+    </div>
+    
+    <script>
+        // Global variables
         let currentPage = 1;
         let isLoading = false;
         let hasMore = true;
+        let bookmarks = {};
+        let totalImages = {{ total_images }};
+        let imagesPerLoad = 20; // Should match Config.IMAGES_PER_LOAD
         
         // DOM elements
         const imagesContainer = document.getElementById('images-container');
-        const loadingIndicator = document.getElementById('loading-indicator');
+        const bookmarkBtn = document.getElementById('bookmark-btn');
+        const metadataBtn = document.getElementById('metadata-btn');
+        const metadataModal = document.getElementById('metadata-modal');
+        const closeModal = document.querySelector('.close');
+        const cancelModal = document.querySelector('.btn.cancel');
+        const metadataForm = document.getElementById('metadata-form');
         
-        // Load images function
-        async function loadImages(page) {
+        // Initialize
+        document.addEventListener('DOMContentLoaded', function() {
+            // Check if we've loaded all images already
+            if ({{ images|length }} >= totalImages) {
+                hasMore = false;
+            }
+            
+            // Load bookmarks
+            loadBookmarks();
+            
+            // Load metadata
+            loadComicMetadata();
+            
+            // Set up event listeners
+            window.addEventListener('scroll', handleScroll);
+            bookmarkBtn.addEventListener('click', toggleBookmark);
+            metadataBtn.addEventListener('click', openMetadataModal);
+            closeModal.addEventListener('click', closeMetadataModal);
+            cancelModal.addEventListener('click', closeMetadataModal);
+            metadataForm.addEventListener('submit', saveMetadata);
+            
+            // Close modal when clicking outside
+            window.addEventListener('click', function(event) {
+                if (event.target === metadataModal) {
+                    closeMetadataModal();
+                }
+            });
+        });
+        
+        // Load bookmarks from server
+        function loadBookmarks() {
+            fetch('/api/bookmarks')
+                .then(response => response.json())
+                .then(data => {
+                    bookmarks = data;
+                    updateBookmarkButton();
+                })
+                .catch(error => {
+                    console.error('Error loading bookmarks:', error);
+                });
+        }
+        
+        // Load comic metadata from server
+        function loadComicMetadata() {
+            fetch(`/api/comic/{{ comic_name }}/metadata`)
+                .then(response => response.json())
+                .then(data => {
+                    comicMetadata = data;
+                    // Populate form fields
+                    document.getElementById('title').value = data.title || '';
+                    document.getElementById('author').value = data.author || '';
+                    document.getElementById('tags').value = data.tags || '';
+                    document.getElementById('description').value = data.description || '';
+                })
+                .catch(error => {
+                    console.error('Error loading metadata:', error);
+                });
+        }
+        
+        // Update bookmark button state
+        function updateBookmarkButton() {
+            if (bookmarks && bookmarks['{{ comic_name }}']) {
+                bookmarkBtn.textContent = 'Bookmarked';
+                bookmarkBtn.classList.add('active');
+            } else {
+                bookmarkBtn.textContent = 'Bookmark';
+                bookmarkBtn.classList.remove('active');
+            }
+        }
+        
+        // Toggle bookmark for current comic
+        function toggleBookmark() {
+            if (!bookmarks) {
+                bookmarks = {};
+            }
+            
+            if (bookmarks['{{ comic_name }}']) {
+                delete bookmarks['{{ comic_name }}'];
+            } else {
+                bookmarks['{{ comic_name }}'] = {
+                    title: '{{ comic_title }}',
+                    timestamp: new Date().toISOString()
+                };
+            }
+            
+            // Save bookmarks to server
+            fetch('/api/bookmarks', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify(bookmarks)
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    updateBookmarkButton();
+                } else {
+                    console.error('Failed to save bookmarks');
+                }
+            })
+            .catch(error => {
+                console.error('Error saving bookmarks:', error);
+            });
+        }
+        
+        // Open metadata modal
+        function openMetadataModal() {
+            metadataModal.style.display = 'flex';
+        }
+        
+        // Close metadata modal
+        function closeMetadataModal() {
+            metadataModal.style.display = 'none';
+        }
+        
+        // Save metadata
+        function saveMetadata(event) {
+            event.preventDefault();
+            
+            const metadata = {
+                title: document.getElementById('title').value,
+                author: document.getElementById('author').value,
+                tags: document.getElementById('tags').value,
+                description: document.getElementById('description').value
+            };
+            
+            fetch(`/api/comic/{{ comic_name }}/metadata`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify(metadata)
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    closeMetadataModal();
+                    // Reload page to show updated metadata
+                    location.reload();
+                } else {
+                    console.error('Failed to save metadata');
+                }
+            })
+            .catch(error => {
+                console.error('Error saving metadata:', error);
+            });
+        }
+        
+        // Handle scroll for infinite loading
+        function handleScroll() {
+            if (window.innerHeight + window.scrollY >= document.body.offsetHeight - 1000) {
+                loadMoreImages();
+            }
+        }
+        
+        // Load more images
+        function loadMoreImages() {
             if (isLoading || !hasMore) return;
             
             isLoading = true;
-            loadingIndicator.classList.remove('hidden');
+            currentPage++;
             
-            try {
-                const response = await fetch(`/api/comic/${COMIC_NAME}/images?page=${page}`);
-                const data = await response.json();
-                
-                if (data.error) {
-                    console.error('Error loading images:', data.error);
-                    return;
-                }
-                
-                // Add images to container
-                data.images.forEach(imageUrl => {
-                    const img = document.createElement('img');
-                    img.src = imageUrl;
-                    img.className = 'comic-image';
-                    img.loading = 'lazy'; // Native lazy loading
-                    imagesContainer.appendChild(img);
+            // Show loading indicator
+            const loadingDiv = document.createElement('div');
+            loadingDiv.className = 'loading';
+            loadingDiv.textContent = 'Loading more images...';
+            imagesContainer.appendChild(loadingDiv);
+            
+            fetch(`/api/comic/{{ comic_name }}/images?page=${currentPage}`)
+                .then(response => response.json())
+                .then(data => {
+                    // Remove loading indicator
+                    imagesContainer.removeChild(loadingDiv);
+                    
+                    // Add new images
+                    data.images.forEach(image => {
+                        const img = document.createElement('img');
+                        img.src = `/comic/{{ comic_name }}/image/${image}`;
+                        img.alt = image;
+                        img.className = 'comic-image';
+                        img.loading = 'lazy';
+                        imagesContainer.appendChild(img);
+                    });
+                    
+                    hasMore = data.has_more;
+                    isLoading = false;
+                })
+                .catch(error => {
+                    // Remove loading indicator
+                    imagesContainer.removeChild(loadingDiv);
+                    console.error('Error loading more images:', error);
+                    isLoading = false;
                 });
-                
-                hasMore = data.has_more;
-                currentPage++;
-                
-            } catch (error) {
-                console.error('Error loading images:', error);
-            } finally {
-                isLoading = false;
-                loadingIndicator.classList.add('hidden');
-            }
         }
-        
-        // Check if we need to load more images
-        function checkScroll() {
-            // If we're near the bottom of the page, load more images
-            if ((window.innerHeight + window.scrollY) >= document.body.offsetHeight - 1000) {
-                loadImages(currentPage);
-            }
-        }
-        
-        // Initial load
-        document.addEventListener('DOMContentLoaded', () => {
-            loadImages(currentPage);
-            
-            // Add scroll event listener for lazy loading
-            window.addEventListener('scroll', checkScroll);
-        });
     </script>
 </body>
 </html>
