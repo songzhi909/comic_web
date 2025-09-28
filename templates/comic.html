@@ -167,6 +167,7 @@
             <a href="/" class="back-link">← Back to Comics</a>
             
             <div class="controls">
+                <button id="toggle-header-btn" class="btn toggle-header">Hide Header</button>
                 <button id="bookmark-btn" class="btn bookmark">Bookmark</button>
                 <button id="metadata-btn" class="btn metadata-btn">Edit Metadata</button>
             </div>
@@ -249,6 +250,12 @@
             closeModal.addEventListener('click', closeMetadataModal);
             cancelModal.addEventListener('click', closeMetadataModal);
             metadataForm.addEventListener('submit', saveMetadata);
+            
+            // Add event listener for toggle header button
+            const toggleHeaderBtn = document.getElementById('toggle-header-btn');
+            if (toggleHeaderBtn) {
+                toggleHeaderBtn.addEventListener('click', toggleHeader);
+            }
             
             // Close modal when clicking outside
             window.addEventListener('click', function(event) {
@@ -428,6 +435,24 @@
                     console.error('Error loading more images:', error);
                     isLoading = false;
                 });
+        }
+        
+        // Toggle header visibility
+        function toggleHeader() {
+            const header = document.querySelector('.header');
+            const toggleBtn = document.getElementById('toggle-header-btn');
+            
+            if (header.style.display === 'none') {
+                // Show header
+                header.style.display = '';
+                toggleBtn.textContent = 'Hide Header';
+                toggleBtn.classList.remove('header-hidden');
+            } else {
+                // Hide header
+                header.style.display = 'none';
+                toggleBtn.textContent = 'Show Header';
+                toggleBtn.classList.add('header-hidden');
+            }
         }
     </script>
 </body>
