@@ -175,7 +175,12 @@
         
         <div class="images-container" id="images-container">
             {% for image in images %}
-                <img src="/comic/{{ comic_name }}/image/{{ image }}" alt="{{ image }}" class="comic-image" loading="lazy">
+                <img src="/comic/{{ comic_name }}/image/{{ image }}" 
+                     alt="{{ image }}" 
+                     class="comic-image" 
+                     loading="lazy"
+                     width="{{ image.width }}"
+                     height="{{ image.height }}">
             {% endfor %}
         </div>
     </div>
@@ -417,12 +422,19 @@
                     imagesContainer.removeChild(loadingDiv);
                     
                     // Add new images
-                    data.images.forEach(image => {
+                    data.images.forEach(imageInfo => {
                         const img = document.createElement('img');
-                        img.src = `/comic/{{ comic_name }}/image/${image}`;
-                        img.alt = image;
+                        img.src = `/comic/{{ comic_name }}/image/${imageInfo.filename}`;
+                        img.alt = imageInfo.filename;
                         img.className = 'comic-image';
                         img.loading = 'lazy';
+                        
+                        // Set image dimensions if available for better rendering performance
+                        if (imageInfo.width && imageInfo.height) {
+                            img.width = imageInfo.width;
+                            img.height = imageInfo.height;
+                        }
+                        
                         imagesContainer.appendChild(img);
                     });
                     

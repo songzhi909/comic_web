@@ -112,8 +112,13 @@ def save_comic_metadata(comic_name, metadata):
     try:
         with get_db_connection() as conn:
             # Check if comic already exists
-            cursor = conn.execute('SELECT id FROM comics WHERE name = ?', (comic_name,))
+            cursor = conn.execute('SELECT id, cover_image FROM comics WHERE name = ?', (comic_name,))
             existing = cursor.fetchone()
+            
+            # If this is an update and no cover_image is provided in metadata, keep the existing one
+            cover_image = metadata.get('cover_image')
+            if existing and cover_image is None:
+                cover_image = existing['cover_image']
             
             if existing:
                 # Update existing comic
@@ -126,7 +131,7 @@ def save_comic_metadata(comic_name, metadata):
                     metadata.get('author'),
                     metadata.get('tags'),
                     metadata.get('description'),
-                    metadata.get('cover_image'),
+                    cover_image,  # Use the determined cover_image
                     comic_name
                 ))
             else:
@@ -140,7 +145,7 @@ def save_comic_metadata(comic_name, metadata):
                     metadata.get('author'),
                     metadata.get('tags'),
                     metadata.get('description'),
-                    metadata.get('cover_image')
+                    cover_image
                 ))
             
             conn.commit()
@@ -160,6 +165,10 @@ def get_all_comics():
             ''')
             comics = []
             for row in cursor.fetchall():
+                # Skip hidden comics (starting with dot)
+                if row['name'].startswith('.'):
+                    continue
+                    
                 comics.append({
                     'name': row['name'],
                     'title': row['title'],
@@ -234,6 +243,11 @@ def sync_comics_with_db():
             
         comic_dirs = []
         for item in os.listdir(Config.COMICS_DIR):
+            # Skip hidden directories (starting with dot)
+            if item.startswith('.'):
+                logger.debug(f"Skipping hidden directory: {item}")
+                continue
+                
             item_path = os.path.join(Config.COMICS_DIR, item)
             if os.path.isdir(item_path):
                 comic_dirs.append(item)
@@ -257,7 +271,7 @@ def sync_comics_with_db():
                 except Exception as e:
                     logger.error(f"Error loading metadata for {comic_name}: {str(e)}")
             
-            # Get cover image
+            # Get cover image only for new comics
             from comics_app.utils import get_comic_cover
             cover_image = get_comic_cover(Config.COMICS_DIR, comic_name)
             
@@ -273,6 +287,27 @@ def sync_comics_with_db():
                     os.remove(metadata_path)
                 except Exception as e:
                     logger.warning(f"Could not remove old metadata file for {comic_name}: {str(e)}")
+        
+        # Update existing comics without changing their cover images
+        existing_comics = [name for name in comic_dirs if name in db_comic_names]
+        for comic_name in existing_comics:
+            # Only resync metadata from file if it exists, but don't change cover image
+            metadata_path = os.path.join(Config.COMICS_DIR, comic_name, "metadata.json")
+            if os.path.exists(metadata_path):
+                try:
+                    with open(metadata_path, 'r', encoding='utf-8') as f:
+                        metadata = json.load(f)
+                        # Explicitly set cover_image to None so it doesn't overwrite existing one
+                        metadata['cover_image'] = None
+                        save_comic_metadata(comic_name, metadata)
+                        
+                    # Remove old metadata file
+                    try:
+                        os.remove(metadata_path)
+                    except Exception as e:
+                        logger.warning(f"Could not remove old metadata file for {comic_name}: {str(e)}")
+                except Exception as e:
+                    logger.error(f"Error loading metadata for {comic_name}: {str(e)}")
         
         logger.info(f"Synced comics with database. Added {len(new_comics)} new comics.")
         return new_comics

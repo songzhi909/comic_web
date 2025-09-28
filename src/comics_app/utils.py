@@ -4,70 +4,113 @@ Utility functions for the Comic Web application
 
 import os
 import logging
+from PIL import Image
 
-# Supported image extensions
-IMAGE_EXTENSIONS = ('.png', '.jpg', '.jpeg', '.gif', '.bmp', '.webp')
+from config import Config
+from comics_app.cache import get_cached_image_size, cache_image_size
 
 logger = logging.getLogger(__name__)
 
-def get_comic_images(comics_dir, comic_name):
-    """
-    Get all image files from a comic directory
+def is_path_safe(path):
+    """Check if a path is safe to use (no directory traversal)"""
+    # Basic security check to prevent directory traversal
+    if '..' in path or path.startswith('/'):
+        return False
     
-    Args:
-        comics_dir (str): Path to the comics directory
-        comic_name (str): Name of the comic
+    # Allow colon only if it's part of a drive letter on Windows (e.g., C:)
+    if ':' in path and not (len(path) > 1 and path[1] == ':' and path[0].isalpha() and len(path.split(':')) == 2):
+        return False
+    
+    # Check for directory separators that could indicate traversal attempts
+    if '\\' in path or '/' in path:
+        return False
+    
+    # Use secure_filename as an additional check but be more permissive with Unicode
+    from werkzeug.utils import secure_filename
+    secured = secure_filename(path)
+    
+    # If secured filename is empty, it might be because of Unicode characters
+    # In that case, we do a more manual check
+    if not secured:
+        # Check each character for potentially unsafe characters
+        unsafe_chars = ['<', '>', '*', '?', '|', '"']
+        for char in unsafe_chars:
+            if char in path:
+                return False
+        return True
+    
+    # If secured version is very different, it might be over-cleaning Unicode names
+    # Allow if the original path is not drastically reduced and doesn't contain unsafe patterns
+    if len(secured) < len(path) // 2:
+        # But still check for unsafe characters
+        unsafe_chars = ['<', '>', '*', '?', '|', '"']
+        for char in unsafe_chars:
+            if char in path:
+                return False
+        return True
         
-    Returns:
-        list: List of image filenames
-    """
-    comic_path = os.path.join(comics_dir, comic_name)
-    if not os.path.exists(comic_path):
-        logger.warning(f"Comic path does not exist: {comic_path}")
-        return []
-    
-    images = []
-    
+    return True
+
+def get_comic_images(comics_dir, comic_name):
+    """Get all image files from a comic directory"""
     try:
-        for filename in sorted(os.listdir(comic_path)):
-            if filename.lower().endswith(IMAGE_EXTENSIONS):
-                images.append(filename)
-        logger.info(f"Found {len(images)} images in comic: {comic_name}")
+        comic_path = os.path.join(comics_dir, comic_name)
+        logger.debug(f"Looking for comic at path: {comic_path}")
+        if not os.path.exists(comic_path):
+            logger.warning(f"Comic path does not exist: {comic_path}")
+            return []
+        
+        # Supported image extensions
+        image_extensions = ('.png', '.jpg', '.jpeg', '.gif', '.bmp', '.webp')
+        images = []
+        
+        try:
+            for filename in sorted(os.listdir(comic_path)):
+                if filename.lower().endswith(image_extensions):
+                    images.append(filename)
+            logger.info(f"Found {len(images)} images in comic: {comic_name}")
+        except Exception as e:
+            logger.error(f"Error reading comic directory {comic_name}: {str(e)}")
+            return []
+        
+        return images
     except Exception as e:
-        logger.error(f"Error reading comic directory {comic_name}: {str(e)}")
+        logger.error(f"Error in get_comic_images for {comic_name}: {str(e)}", exc_info=True)
         return []
-    
-    return images
 
 def get_comic_cover(comics_dir, comic_name):
-    """
-    Get the cover image for a comic (first image in the directory)
-    
-    Args:
-        comics_dir (str): Path to the comics directory
-        comic_name (str): Name of the comic
-        
-    Returns:
-        str or None: Filename of the cover image or None if not found
-    """
-    images = get_comic_images(comics_dir, comic_name)
-    if images:
-        logger.info(f"Cover image for {comic_name}: {images[0]}")
-        return images[0]
-    logger.warning(f"No cover image found for comic: {comic_name}")
-    return None
+    """Get the cover image for a comic (first image in the directory)"""
+    try:
+        images = get_comic_images(comics_dir, comic_name)
+        if images:
+            logger.info(f"Cover image for {comic_name}: {images[0]}")
+            return images[0]
+        logger.warning(f"No cover image found for comic: {comic_name}")
+        return None
+    except Exception as e:
+        logger.error(f"Error getting cover image for {comic_name}: {e}", exc_info=True)
+        return None
 
-def is_path_safe(path_segment):
+def get_image_size(comics_dir, comic_name, filename):
     """
-    Check if a path segment is safe (no directory traversal attempts)
+    Get image dimensions with caching to improve performance
+    """
+    # Try to get from cache first
+    width, height = get_cached_image_size(comic_name, filename)
+    if width is not None and height is not None:
+        return width, height
     
-    Args:
-        path_segment (str): Path segment to check
-        
-    Returns:
-        bool: True if path is safe, False otherwise
-    """
-    return '..' not in path_segment and not path_segment.startswith('/')
+    # If not in cache, calculate and store
+    try:
+        image_path = os.path.join(comics_dir, comic_name, filename)
+        with Image.open(image_path) as img:
+            width, height = img.size
+            # Cache the result
+            cache_image_size(comic_name, filename, width, height)
+            return width, height
+    except Exception as e:
+        logger.warning(f"Could not get image size for {comic_name}/{filename}: {e}")
+        return None, None
 
 def search_comics(comics_dir, query):
     """
