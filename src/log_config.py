@@ -1,6 +1,7 @@
 import os
 import sys
 import logging
+import io
 from logging.handlers import RotatingFileHandler
 
 def setup_logging():
@@ -24,16 +25,20 @@ def setup_logging():
         '%(asctime)s - %(name)s - %(levelname)s - %(funcName)s:%(lineno)d - %(message)s'
     )
     
-    # Create console handler
+    # Create console handler with UTF-8 encoding
     console_handler = logging.StreamHandler()
     console_handler.setFormatter(log_formatter)
+    # Ensure UTF-8 encoding for console output to prevent UnicodeEncodeError on Windows
+    if isinstance(console_handler.stream, io.TextIOWrapper):
+        console_handler.stream.reconfigure(encoding='utf-8')
     
     # Create file handler with rotation
     log_file = os.path.join(logs_dir, 'comic_web.log')
     file_handler = RotatingFileHandler(
         log_file, 
         maxBytes=10*1024*1024,  # 10MB
-        backupCount=5
+        backupCount=5,
+        encoding='utf-8'  # Explicitly set UTF-8 encoding to handle Unicode characters
     )
     file_handler.setFormatter(log_formatter)
     
