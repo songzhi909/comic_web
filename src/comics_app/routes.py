@@ -16,7 +16,7 @@ from werkzeug.exceptions import HTTPException
 
 from config import Config
 from comics_app.models import Comic, ComicImage
-from comics_app.utils import get_comic_images, get_comic_cover, is_path_safe
+from comics_app.utils import get_comic_images, get_comic_cover, is_path_safe, get_image_size
 from comics_app.database import (
     init_db, 
     get_comic_metadata, 
