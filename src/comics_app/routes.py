@@ -60,20 +60,41 @@ def get_all_comics():
 
 def create_app():
     """Create and configure the Flask application"""
-    # Get the project root directory
-    project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    
-    # Set template and static folders explicitly with absolute paths
-    template_dir = os.path.join(project_root, '..', 'templates')
-    static_dir = os.path.join(project_root, '..', 'static')
+    # Check if running as compiled executable
+    if getattr(sys, 'frozen', False):
+        # Running as compiled executable
+        template_dir = os.path.join(sys._MEIPASS, 'templates')
+        static_dir = os.path.join(sys._MEIPASS, 'static')
+    else:
+        # Running in development (Python interpreter)
+        # Get the project root directory
+        project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        template_dir = os.path.join(project_root, 'templates')
+        static_dir = os.path.join(project_root, 'static')
     
     app = Flask(__name__, 
-                template_folder=os.path.abspath(template_dir),
-                static_folder=os.path.abspath(static_dir))
+                template_folder=template_dir,
+                static_folder=static_dir)
     
     # Initialize database
     with app.app_context():
         init_db()
+        
+    @app.route('/shutdown', methods=['POST'])
+    def shutdown():
+        """Shutdown the application (only available in executable mode)"""
+        if not getattr(sys, 'frozen', False):
+            # Only allow shutdown in executable mode for security
+            abort(403)
+        
+        logger.info("Shutdown request received, shutting down server...")
+        func = request.environ.get('werkzeug.server.shutdown')
+        if func is None:
+            # For non-werkzeug servers, just exit
+            os._exit(0)
+        else:
+            func()
+        return 'Server shutting down...'
     
     @app.errorhandler(404)
     def not_found_error(error):
@@ -99,14 +120,12 @@ def create_app():
         if isinstance(e, HTTPException):
             return e
         
-        # Log the error
+        # Now you're handling non-HTTP exceptions only
         logger.error(f"Unhandled exception: {e}", exc_info=True)
-        
-        # Return a generic error page for production
-        return render_template('error.html',
-                             title="Unexpected Error",
-                             message="An unexpected error occurred.",
-                             error_code=500), 500
+        return render_template('error.html', 
+                               title="Internal Server Error",
+                               message="An unexpected error occurred. Please try again later.",
+                               error_code=500), 500
     
     @app.route('/')
     def index():

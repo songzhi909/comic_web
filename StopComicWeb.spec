@@ -2,11 +2,11 @@
 
 
 a = Analysis(
-    ['D:\\workspace\\python\\comic_web\\src\\app.py'],
+    ['D:\\workspace\\python\\comic_web\\src\\build\\stop_app.py'],
     pathex=[],
     binaries=[],
-    datas=[('D:\\workspace\\python\\comic_web\\templates', 'templates'), ('D:\\workspace\\python\\comic_web\\static', 'static')],
-    hiddenimports=['flask', 'flask_cors'],
+    datas=[],
+    hiddenimports=['requests', 'psutil'],
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
@@ -22,7 +22,7 @@ exe = EXE(
     a.binaries,
     a.datas,
     [],
-    name='ComicWeb',
+    name='StopComicWeb',
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
