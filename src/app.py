@@ -24,6 +24,9 @@ init_db()
 # Create the Flask application
 app = create_app()
 
+# Configure session
+app.config['SECRET_KEY'] = 'comic_web_secret_key_2025'
+
 def open_browser():
     """Open the web browser after a short delay to ensure server is running"""
     time.sleep(2)

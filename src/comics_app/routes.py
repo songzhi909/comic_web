@@ -10,7 +10,7 @@ import sys
 # Add the src directory to the path for imports
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from flask import Flask, render_template, jsonify, send_from_directory, request, redirect, url_for, abort
+from flask import Flask, render_template, jsonify, send_from_directory, request, redirect, url_for, abort, session
 from werkzeug.utils import secure_filename
 from werkzeug.exceptions import HTTPException
 
@@ -25,7 +25,10 @@ from comics_app.database import (
     save_bookmark,
     remove_bookmark,
     get_bookmarks,
-    sync_comics_with_db
+    sync_comics_with_db,
+    get_user_by_username,
+    create_user,
+    verify_user_password
 )
 
 logger = logging.getLogger(__name__)
@@ -44,13 +47,25 @@ def get_all_comics():
         if db_comic['name'].startswith('.'):
             continue
             
+        # Handle tags - could be string, list, or None
+        tags = db_comic['tags']
+        if isinstance(tags, str):
+            # Split string into list
+            tags = tags.split(',') if tags else []
+        elif tags is None:
+            # If None, make it an empty list
+            tags = []
+        elif not isinstance(tags, list):
+            # If it's something else, make it a list with one item
+            tags = [str(tags)]
+            
         comic = Comic(
             name=db_comic['name'],
             cover_image=db_comic['cover_image'],
             metadata={
                 'title': db_comic['title'],
                 'author': db_comic['author'],
-                'tags': db_comic['tags'],
+                'tags': tags,
                 'description': db_comic['description']
             }
         )
@@ -60,132 +75,206 @@ def get_all_comics():
 
 def create_app():
     """Create and configure the Flask application"""
-    # Check if running as compiled executable
-    if getattr(sys, 'frozen', False):
-        # Running as compiled executable
-        template_dir = os.path.join(sys._MEIPASS, 'templates')
-        static_dir = os.path.join(sys._MEIPASS, 'static')
-    else:
-        # Running in development (Python interpreter)
-        # Get the project root directory
-        project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-        template_dir = os.path.join(project_root, 'templates')
-        static_dir = os.path.join(project_root, 'static')
-    
     app = Flask(__name__, 
-                template_folder=template_dir,
-                static_folder=static_dir)
+                template_folder=Config.TEMPLATE_FOLDER,
+                static_folder=Config.STATIC_FOLDER)
     
-    # Initialize database
-    with app.app_context():
-        init_db()
+    # Add secret key for session management
+    app.secret_key = 'comic_web_secret_key_2025'
+    
+    @app.route('/login', methods=['GET', 'POST'])
+    def login():
+        """Handle user login"""
+        # If user is already logged in, redirect to main page
+        if 'user' in session:
+            return redirect(url_for('index'))
+            
+        if request.method == 'POST':
+            username = request.form['username']
+            password = request.form['password']
+            
+            # Verify user credentials
+            if verify_user_password(username, password):
+                # Store user in session
+                session['user'] = username
+                logger.info(f"User {username} logged in successfully")
+                return redirect(url_for('index'))
+            else:
+                logger.warning(f"Failed login attempt for user: {username}")
+                return render_template('login.html', error='Invalid username or password')
         
-    @app.route('/shutdown', methods=['POST'])
-    def shutdown():
-        """Shutdown the application (only available in executable mode)"""
-        if not getattr(sys, 'frozen', False):
-            # Only allow shutdown in executable mode for security
-            abort(403)
+        # GET request - show login page
+        return render_template('login.html')
+    
+    @app.route('/register', methods=['POST'])
+    def register():
+        """Handle user registration"""
+        username = request.form['username']
+        password = request.form['password']
+        confirm_password = request.form.get('confirm_password', '')
         
-        logger.info("Shutdown request received, shutting down server...")
-        func = request.environ.get('werkzeug.server.shutdown')
-        if func is None:
-            # For non-werkzeug servers, just exit
-            os._exit(0)
+        # Check if passwords match
+        if password != confirm_password:
+            return render_template('login.html', error='Passwords do not match')
+        
+        # Check if user already exists
+        if get_user_by_username(username):
+            return render_template('login.html', error='Username already exists')
+        
+        # Create new user
+        if create_user(username, password):
+            session['user'] = username
+            logger.info(f"New user registered: {username}")
+            return redirect(url_for('index'))
         else:
-            func()
-        return 'Server shutting down...'
+            return render_template('login.html', error='Registration failed')
     
-    @app.errorhandler(404)
-    def not_found_error(error):
-        """Handle 404 errors"""
-        return render_template('error.html', 
-                             title="Page Not Found",
-                             message="The page you are looking for does not exist.",
-                             error_code=404), 404
-    
-    @app.errorhandler(500)
-    def internal_error(error):
-        """Handle 500 errors"""
-        logger.error(f"Internal server error: {error}")
-        return render_template('error.html', 
-                             title="Internal Server Error",
-                             message="An unexpected error occurred. Please try again later.",
-                             error_code=500), 500
-    
-    @app.errorhandler(Exception)
-    def handle_exception(e):
-        """Handle all uncaught exceptions"""
-        # Pass through HTTP errors
-        if isinstance(e, HTTPException):
-            return e
-        
-        # Now you're handling non-HTTP exceptions only
-        logger.error(f"Unhandled exception: {e}", exc_info=True)
-        return render_template('error.html', 
-                               title="Internal Server Error",
-                               message="An unexpected error occurred. Please try again later.",
-                               error_code=500), 500
+    @app.route('/logout')
+    def logout():
+        """Handle user logout"""
+        session.pop('user', None)
+        return redirect(url_for('login'))
     
     @app.route('/')
     def index():
-        """Main page showing all comics"""
+        """Display the main page with all comics"""
+        # Check if user is logged in
+        if 'user' not in session:
+            return redirect(url_for('login'))
+            
         try:
-            search_query = request.args.get('search', '').lower()
             comics = get_all_comics()
-            
-            # Apply search filter if provided
-            if search_query:
-                comics = [comic for comic in comics 
-                         if search_query in comic.name.lower() or 
-                            (comic.metadata and (
-                                search_query in (comic.metadata.get('title') or '').lower() or
-                                search_query in (comic.metadata.get('author') or '').lower() or
-                                search_query in (comic.metadata.get('tags') or '').lower()
-                            ))]
-            
-            return render_template('index.html', comics=comics, search_query=search_query)
+            user = session['user']
+            return render_template('index.html', comics=comics, user=user)
         except Exception as e:
-            logger.error(f"Error in index route: {e}")
-            abort(500)
+            logger.error(f"Error loading comics: {e}")
+            return render_template('error.html', error="Failed to load comics"), 500
     
     @app.route('/comic/<name>')
     def comic(name):
-        """Page for viewing a specific comic"""
-        try:
-            if not is_path_safe(name):
-                logger.warning(f"Unsafe path attempt: {name}")
-                abort(400)
-                
-            comic_path = os.path.join(Config.COMICS_DIR, name)
-            if not os.path.exists(comic_path):
-                logger.warning(f"Comic not found: {name}")
-                abort(404)
-                
-            # Load metadata
-            metadata = get_comic_metadata(name)
-            comic_title = metadata.get('title', name)
-                
-            # Get first batch of images
-            all_images = get_comic_images(Config.COMICS_DIR, name)
-            initial_images = all_images[:Config.IMAGES_PER_LOAD]
+        """Display a specific comic"""
+        # Check if user is logged in
+        if 'user' not in session:
+            return redirect(url_for('login'))
             
+        # Security check - ensure the path is safe
+        if not is_path_safe(name):
+            logger.warning(f"Attempted access to unsafe path: {name}")
+            abort(404)
+            
+        try:
+            images = get_comic_images(Config.COMICS_DIR, name)
+            cover_image = get_comic_cover(Config.COMICS_DIR, name)
+            metadata = get_comic_metadata(name)
+            
+            # If no metadata found, create default
+            if not metadata:
+                metadata = {'title': name, 'author': 'Unknown', 'tags': [], 'description': ''}
+                
+            comic = Comic(name=name, cover_image=cover_image, metadata=metadata)
             return render_template('comic.html', 
+                                 comic=comic, 
+                                 images=images,
                                  comic_name=name,
-                                 comic_title=comic_title,
-                                 images=initial_images,
-                                 total_images=len(all_images))
+                                 comic_title=metadata.get('title', name),
+                                 total_images=len(images))
+        except FileNotFoundError:
+            logger.error(f"Comic not found: {name}")
+            abort(404)
         except Exception as e:
-            logger.error(f"Error in comic route for {name}: {e}")
-            abort(500)
+            logger.error(f"Error loading comic {name}: {e}")
+            return render_template('error.html', error=f"Failed to load comic: {name}"), 500
+
+    @app.route('/comics/<name>/<path:filename>')
+    def comic_image(name, filename):
+        """Serve comic images"""
+        # Check if user is logged in
+        if 'user' not in session:
+            abort(403)
+            
+        # Security check - ensure the path is safe
+        if not is_path_safe(name) or not is_path_safe(filename):
+            logger.warning(f"Attempted access to unsafe path: {name}/{filename}")
+            abort(404)
+            
+        # Construct the full path to the comics directory
+        comic_path = os.path.join(Config.COMICS_DIR, name)
+        
+        # Use Flask's send_from_directory to safely serve the file
+        try:
+            return send_from_directory(comic_path, filename)
+        except FileNotFoundError:
+            logger.error(f"File not found: {name}/{filename}")
+            abort(404)
+    
+    @app.route('/comic/<name>/cover')
+    def comic_cover(name):
+        """Serve comic cover image"""
+        # Check if user is logged in
+        if 'user' not in session:
+            abort(403)
+            
+        # Security check - ensure the path is safe
+        if not is_path_safe(name):
+            logger.warning(f"Attempted access to unsafe path: {name}")
+            abort(404)
+            
+        # Get the cover image for this comic
+        try:
+            cover_image = get_comic_cover(Config.COMICS_DIR, name)
+            if cover_image:
+                # Construct the full path to the comics directory
+                comic_path = os.path.join(Config.COMICS_DIR, name)
+                cover_path = os.path.join(comic_path, cover_image)
+                
+                # Check if file exists
+                if os.path.exists(cover_path):
+                    return send_from_directory(comic_path, cover_image)
+                else:
+                    # If cover image file doesn't exist, return placeholder
+                    return send_from_directory(app.static_folder, 'placeholder.png')
+            else:
+                # If no cover image found, return placeholder
+                return send_from_directory(app.static_folder, 'placeholder.png')
+        except Exception as e:
+            logger.error(f"Error serving cover for {name}: {e}")
+            # Return placeholder on any error
+            return send_from_directory(app.static_folder, 'placeholder.png')
+    
+    @app.route('/api/comics')
+    def api_comics():
+        """API endpoint to get all comics as JSON"""
+        # Check if user is logged in
+        if 'user' not in session:
+            return jsonify({'error': 'Unauthorized'}), 401
+            
+        try:
+            comics = get_all_comics()
+            comics_data = []
+            for comic in comics:
+                comics_data.append({
+                    'name': comic.name,
+                    'cover_image': comic.cover_image,
+                    'metadata': comic.metadata
+                })
+            return jsonify(comics_data)
+        except Exception as e:
+            logger.error(f"Error in API comics endpoint: {e}")
+            return jsonify({'error': 'Failed to load comics'}), 500
     
     @app.route('/api/comic/<name>/images')
     def api_comic_images(name):
-        """API endpoint for getting comic images with pagination"""
+        """API endpoint to get images for a specific comic"""
+        # Check if user is logged in
+        if 'user' not in session:
+            return jsonify({'error': 'Unauthorized'}), 401
+            
+        # Security check
+        if not is_path_safe(name):
+            logger.warning(f"Attempted access to unsafe path in API: {name}")
+            return jsonify({'error': 'Invalid comic name'}), 400
+            
         try:
-            if not is_path_safe(name):
-                return jsonify({"error": "Invalid comic name"}), 400
-                
             page = int(request.args.get('page', 1))
             all_images = get_comic_images(Config.COMICS_DIR, name)
             
@@ -209,113 +298,185 @@ def create_app():
                 "has_more": end_idx < len(all_images),
                 "total": len(all_images)
             })
-        except Exception as e:
-            logger.error(f"Error in api_comic_images for {name}: {e}")
-            return jsonify({"error": "Internal server error"}), 500
-    
-    @app.route('/comic/<name>/image/<filename>')
-    def comic_image(name, filename):
-        """Serve a specific comic image"""
-        try:
-            if not is_path_safe(name) or not is_path_safe(filename):
-                logger.warning(f"Unsafe path attempt: {name}/{filename}")
-                abort(400)
-                
-            comic_path = os.path.join(Config.COMICS_DIR, name)
-            return send_from_directory(comic_path, filename)
         except FileNotFoundError:
-            logger.warning(f"Image not found: {name}/{filename}")
-            abort(404)
+            logger.error(f"Comic not found in API: {name}")
+            return jsonify({'error': 'Comic not found'}), 404
         except Exception as e:
-            logger.error(f"Error serving image {name}/{filename}: {e}")
-            abort(500)
+            logger.error(f"Error in API comic images endpoint: {e}")
+            return jsonify({'error': 'Failed to load images'}), 500
     
-    @app.route('/comic/<name>/cover')
-    def comic_cover(name):
-        """Serve the cover image for a comic"""
-        try:
-            if not is_path_safe(name):
-                logger.warning(f"Unsafe path attempt: {name}")
-                abort(400)
+    @app.route('/api/bookmarks', methods=['GET', 'POST', 'DELETE'])
+    def api_bookmarks():
+        """API endpoint to manage bookmarks"""
+        # Check if user is logged in
+        if 'user' not in session:
+            return jsonify({'error': 'Unauthorized'}), 401
+            
+        if request.method == 'GET':
+            try:
+                bookmarks = get_bookmarks()
+                return jsonify(bookmarks)
+            except Exception as e:
+                logger.error(f"Error getting bookmarks: {e}")
+                return jsonify({'error': 'Failed to get bookmarks'}), 500
                 
-            logger.debug(f"Attempting to get cover for comic: {name}")
-            cover = get_comic_cover(Config.COMICS_DIR, name)
-            if not cover:
-                logger.info(f"No cover found for comic: {name}")
-                abort(404)
-                
-            logger.debug(f"Found cover image: {cover} for comic: {name}")
-            comic_path = os.path.join(Config.COMICS_DIR, name)
-            logger.debug(f"Comic path: {comic_path}")
-            return send_from_directory(comic_path, cover)
-        except FileNotFoundError as e:
-            logger.warning(f"Cover file not found for {name}: {e}")
-            abort(404)
-        except Exception as e:
-            logger.error(f"Error serving cover for {name}: {e}", exc_info=True)
-            abort(500)
-    
-    @app.route('/api/comic/<name>/metadata', methods=['GET', 'POST'])
-    def comic_metadata(name):
-        """API endpoint for getting or updating comic metadata"""
-        try:
-            if not is_path_safe(name):
-                return jsonify({"error": "Invalid comic name"}), 400
-                
-            if request.method == 'GET':
-                metadata = get_comic_metadata(name)
-                return jsonify(metadata)
-            elif request.method == 'POST':
-                metadata = request.get_json()
-                # Ensure we don't accidentally overwrite the cover_image with null
-                # If cover_image is not in the metadata, explicitly set it to None
-                # so the save function knows to keep the existing one
-                if 'cover_image' not in metadata:
-                    metadata['cover_image'] = None
-                    
-                if save_comic_metadata(name, metadata):
-                    return jsonify({"success": True})
-                else:
-                    return jsonify({"error": "Failed to save metadata"}), 500
-        except Exception as e:
-            logger.error(f"Error in comic_metadata for {name}: {e}")
-            return jsonify({"error": "Internal server error"}), 500
-    
-    @app.route('/api/bookmarks', methods=['GET', 'POST'])
-    def bookmarks():
-        """API endpoint for getting or updating bookmarks"""
-        try:
-            if request.method == 'GET':
-                bookmarks_data = get_bookmarks()
-                return jsonify(bookmarks_data)
-            elif request.method == 'POST':
+        elif request.method == 'POST':
+            try:
                 data = request.get_json()
-                if isinstance(data, dict):
-                    # For backward compatibility, handle both old format and new format
-                    if 'comic_name' in data and 'action' in data:
-                        # New format with action
-                        comic_name = data['comic_name']
-                        comic_title = data.get('comic_title', comic_name)
-                        action = data['action']
-                        
-                        if action == 'add':
-                            if save_bookmark(comic_name, comic_title):
-                                return jsonify({"success": True})
-                            else:
-                                return jsonify({"error": "Failed to save bookmark"}), 500
-                        elif action == 'remove':
-                            if remove_bookmark(comic_name):
-                                return jsonify({"success": True})
-                            else:
-                                return jsonify({"error": "Failed to remove bookmark"}), 500
+                # Check if data is in the new format (with comic_name and action)
+                if isinstance(data, dict) and 'comic_name' in data and 'action' in data:
+                    name = data.get('comic_name')
+                    title = data.get('comic_title', name)
+                    action = data.get('action')
+                    
+                    # Handle add/remove actions
+                    if action == 'add':
+                        if save_bookmark(name, title):
+                            return jsonify({"success": True})
+                        else:
+                            return jsonify({"error": "Failed to save bookmark"}), 500
+                    elif action == 'remove':
+                        if remove_bookmark(name):
+                            return jsonify({"success": True})
+                        else:
+                            return jsonify({"error": "Failed to remove bookmark"}), 500
                     else:
-                        # Old format - replace all bookmarks
-                        # In this case, we'll just return success since we're not using this approach anymore
-                        return jsonify({"success": True})
+                        return jsonify({"error": "Invalid action"}), 400
                 else:
-                    return jsonify({"error": "Invalid data format"}), 400
-        except Exception as e:
-            logger.error(f"Error in bookmarks API: {e}")
-            return jsonify({"error": "Internal server error"}), 500
+                    # Old format (with name and title)
+                    name = data.get('name')
+                    title = data.get('title', name)
+                
+                if not name:
+                    return jsonify({'error': 'Comic name is required'}), 400
+                    
+                if save_bookmark(name, title):
+                    return jsonify({'message': 'Bookmark saved'}), 201
+                else:
+                    return jsonify({'error': 'Failed to save bookmark'}), 500
+            except Exception as e:
+                logger.error(f"Error saving bookmark: {e}")
+                return jsonify({'error': 'Failed to save bookmark'}), 500
+                
+        elif request.method == 'DELETE':
+            try:
+                data = request.get_json()
+                name = data.get('name')
+                
+                if not name:
+                    return jsonify({'error': 'Comic name is required'}), 400
+                    
+                if remove_bookmark(name):
+                    return jsonify({'message': 'Bookmark removed'})
+                else:
+                    return jsonify({'error': 'Failed to remove bookmark'}), 500
+            except Exception as e:
+                logger.error(f"Error removing bookmark: {e}")
+                return jsonify({'error': 'Failed to remove bookmark'}), 500
+
+    @app.route('/api/comic/<name>/metadata', methods=['GET', 'POST'])
+    def api_comic_metadata(name):
+        """API endpoint to get or update comic metadata"""
+        # Check if user is logged in
+        if 'user' not in session:
+            return jsonify({'error': 'Unauthorized'}), 401
+            
+        # Security check
+        if not is_path_safe(name):
+            logger.warning(f"Attempted access to unsafe path in API: {name}")
+            return jsonify({'error': 'Invalid comic name'}), 400
+            
+        if request.method == 'GET':
+            try:
+                # Get metadata from database
+                metadata = get_comic_metadata(name)
+                if not metadata:
+                    # Return default metadata if none found
+                    metadata = {
+                        'title': name,
+                        'author': 'Unknown',
+                        'tags': [],
+                        'description': ''
+                    }
+                return jsonify(metadata)
+            except Exception as e:
+                logger.error(f"Error getting metadata for {name}: {e}")
+                return jsonify({'error': 'Failed to get metadata'}), 500
+                
+        elif request.method == 'POST':
+            try:
+                # Get the data from request
+                data = request.get_json()
+                
+                # Get existing metadata
+                metadata = get_comic_metadata(name)
+                if not metadata:
+                    metadata = {}
+                
+                # Update metadata fields
+                if 'title' in data:
+                    metadata['title'] = data['title']
+                if 'author' in data:
+                    metadata['author'] = data['author']
+                if 'tags' in data:
+                    # Handle tags - convert string to list if needed
+                    if isinstance(data['tags'], str):
+                        metadata['tags'] = [tag.strip() for tag in data['tags'].split(',') if tag.strip()]
+                    else:
+                        metadata['tags'] = data['tags']
+                if 'description' in data:
+                    metadata['description'] = data['description']
+                
+                # Save updated metadata to database
+                if save_comic_metadata(name, metadata):
+                    return jsonify({'success': True, 'message': 'Metadata updated successfully'})
+                else:
+                    return jsonify({'success': False, 'error': 'Failed to update metadata'}), 500
+            except Exception as e:
+                logger.error(f"Error updating metadata for {name}: {e}")
+                return jsonify({'success': False, 'error': 'Failed to update metadata'}), 500
+
+    @app.errorhandler(404)
+    def not_found_error(error):
+        """Handle 404 errors"""
+        logger.error(f"Page not found: {error}")
+        return render_template('error.html',
+                             error="The page you are looking for does not exist."), 404
     
+    @app.errorhandler(500)
+    def internal_error(error):
+        """Handle 500 errors"""
+        logger.error(f"Internal server error: {error}")
+        return render_template('error.html',
+                             error="An unexpected error occurred. Please try again later."), 500
+    
+    @app.errorhandler(Exception)
+    def handle_exception(e):
+        """Handle all uncaught exceptions"""
+        # Pass through HTTP errors
+        if isinstance(e, HTTPException):
+            return e
+        
+        # Now you're handling non-HTTP exceptions only
+        logger.error(f"Unhandled exception: {e}", exc_info=True)
+        return render_template('error.html',
+                               error="An unexpected error occurred. Please try again later."), 500
+
+    # Add this route to enable shutdown via HTTP request (only in executable mode)
+    @app.route('/shutdown', methods=['POST'])
+    def shutdown():
+        """Shutdown the application (only available in executable mode)"""
+        if not getattr(sys, 'frozen', False):
+            # Only allow shutdown in executable mode for security
+            abort(403)
+        
+        logger.info("Shutdown request received, shutting down server...")
+        func = request.environ.get('werkzeug.server.shutdown')
+        if func is None:
+            # For non-werkzeug servers, just exit
+            os._exit(0)
+        else:
+            func()
+        return 'Server shutting down...'
+
     return app

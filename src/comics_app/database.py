@@ -6,6 +6,7 @@ import sqlite3
 import os
 import logging
 import json
+import hashlib
 from contextlib import contextmanager
 from config import Config
 
@@ -43,27 +44,41 @@ def init_db():
                 )
             ''')
             
+            # Create users table
+            conn.execute('''
+                CREATE TABLE IF NOT EXISTS users (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    username TEXT UNIQUE NOT NULL,
+                    password_hash TEXT NOT NULL,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            ''')
+            
             # Create index for faster searches
             conn.execute('''
                 CREATE INDEX IF NOT EXISTS idx_comics_name ON comics(name)
             ''')
             
             conn.execute('''
-                CREATE INDEX IF NOT EXISTS idx_comics_title ON comics(title)
+                CREATE INDEX IF NOT EXISTS idx_users_username ON users(username)
             ''')
             
-            conn.execute('''
-                CREATE INDEX IF NOT EXISTS idx_comics_author ON comics(author)
-            ''')
-            
-            conn.execute('''
-                CREATE INDEX IF NOT EXISTS idx_comics_tags ON comics(tags)
-            ''')
+            # Insert default admin user if no users exist
+            cursor = conn.execute('SELECT COUNT(*) FROM users')
+            count = cursor.fetchone()[0]
+            if count == 0:
+                # Create default admin user with password "admin"
+                password_hash = hashlib.sha256("admin".encode()).hexdigest()
+                conn.execute('''
+                    INSERT INTO users (username, password_hash) VALUES (?, ?)
+                ''', ("admin", password_hash))
+                logger.info("Created default admin user with username 'admin' and password 'admin'")
             
             conn.commit()
             logger.info("Database initialized successfully")
     except Exception as e:
-        logger.error(f"Error initializing database: {str(e)}")
+        logger.error(f"Error initializing database: {e}")
+        raise
 
 @contextmanager
 def get_db_connection():
@@ -129,7 +144,7 @@ def save_comic_metadata(comic_name, metadata):
                 ''', (
                     metadata.get('title'),
                     metadata.get('author'),
-                    metadata.get('tags'),
+                    ','.join(metadata.get('tags', [])) if isinstance(metadata.get('tags'), list) else metadata.get('tags'),
                     metadata.get('description'),
                     cover_image,  # Use the determined cover_image
                     comic_name
@@ -143,7 +158,7 @@ def save_comic_metadata(comic_name, metadata):
                     comic_name,
                     metadata.get('title'),
                     metadata.get('author'),
-                    metadata.get('tags'),
+                    ','.join(metadata.get('tags', [])) if isinstance(metadata.get('tags'), list) else metadata.get('tags'),
                     metadata.get('description'),
                     cover_image
                 ))
@@ -169,11 +184,23 @@ def get_all_comics():
                 if row['name'].startswith('.'):
                     continue
                     
+                # Handle tags - ensure it's always a list
+                tags = row['tags']
+                if isinstance(tags, str):
+                    # Split string into list
+                    tags = tags.split(',') if tags else []
+                elif tags is None:
+                    # If None, make it an empty list
+                    tags = []
+                elif not isinstance(tags, list):
+                    # If it's something else, make it a list with one item
+                    tags = [str(tags)]
+                    
                 comics.append({
                     'name': row['name'],
                     'title': row['title'],
                     'author': row['author'],
-                    'tags': row['tags'],
+                    'tags': tags,
                     'description': row['description'],
                     'cover_image': row['cover_image']
                 })
@@ -314,3 +341,53 @@ def sync_comics_with_db():
     except Exception as e:
         logger.error(f"Error syncing comics with database: {str(e)}")
         return []
+
+def get_user_by_username(username):
+    """Get user by username"""
+    try:
+        with get_db_connection() as conn:
+            cursor = conn.execute('''
+                SELECT id, username, password_hash FROM users WHERE username = ?
+            ''', (username,))
+            row = cursor.fetchone()
+            if row:
+                return {
+                    'id': row[0],
+                    'username': row[1],
+                    'password_hash': row[2]
+                }
+            return None
+    except Exception as e:
+        logger.error(f"Error getting user by username: {e}")
+        return None
+
+def create_user(username, password):
+    """Create a new user"""
+    try:
+        password_hash = hashlib.sha256(password.encode()).hexdigest()
+        with get_db_connection() as conn:
+            conn.execute('''
+                INSERT INTO users (username, password_hash) VALUES (?, ?)
+            ''', (username, password_hash))
+            conn.commit()
+            logger.info(f"Created user: {username}")
+            return True
+    except sqlite3.IntegrityError:
+        logger.warning(f"User already exists: {username}")
+        return False
+    except Exception as e:
+        logger.error(f"Error creating user: {e}")
+        return False
+
+def verify_user_password(username, password):
+    """Verify user password"""
+    try:
+        user = get_user_by_username(username)
+        if not user:
+            return False
+        
+        password_hash = hashlib.sha256(password.encode()).hexdigest()
+        return user['password_hash'] == password_hash
+    except Exception as e:
+        logger.error(f"Error verifying user password: {e}")
+        return False

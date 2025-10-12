@@ -160,6 +160,51 @@
         .btn.save:hover {
             background-color: #1e7e34;
         }
+        
+        /* Cartoon-style image counter */
+        .image-counter {
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
+            background-color: #ff6b6b;
+            color: white;
+            padding: 10px 15px;
+            border-radius: 30px;
+            font-weight: bold;
+            font-size: 16px;
+            box-shadow: 0 4px 8px rgba(0,0,0,0.3);
+            z-index: 99;
+            border: 3px solid white;
+            text-align: center;
+            min-width: 80px;
+        }
+        
+        .image-counter::before {
+            content: "📄";
+            margin-right: 5px;
+        }
+        
+        .image-counter:hover {
+            transform: scale(1.1);
+            transition: transform 0.2s ease;
+        }
+        
+        /* Animation for the counter */
+        @keyframes bounce {
+            0%, 20%, 50%, 80%, 100% {
+                transform: translateY(0);
+            }
+            40% {
+                transform: translateY(-10px);
+            }
+            60% {
+                transform: translateY(-5px);
+            }
+        }
+        
+        .image-counter.updated {
+            animation: bounce 0.5s;
+        }
     </style>
 </head>
 <body>
@@ -176,15 +221,13 @@
         </div>
         
         <div class="images-container" id="images-container">
-            {% for image in images %}
-                <img src="/comic/{{ comic_name }}/image/{{ image }}" 
-                     alt="{{ image }}" 
-                     class="comic-image" 
-                     loading="lazy"
-                     width="{{ image.width }}"
-                     height="{{ image.height }}">
-            {% endfor %}
+            <!-- Images will be loaded here dynamically -->
         </div>
+    </div>
+    
+    <!-- Image counter (cartoon style) -->
+    <div class="image-counter" id="image-counter">
+        <span id="current-image">0</span> / <span id="total-images">{{ total_images | default(0) }}</span>
     </div>
     
     <!-- Metadata Modal -->
@@ -224,58 +267,92 @@
         let currentPage = 1;
         let isLoading = false;
         let hasMore = true;
-        let totalImages = {{ total_images }};
+        let totalImages = {{ total_images | default(0) }};
         let bookmarks = {};
         let comicMetadata = {};
+        let currentImageCount = 0; // Track currently loaded images
+        let currentViewedImage = 0; // Track currently viewed image
         
         // DOM elements
-        const imagesContainer = document.getElementById('images-container');
-        const bookmarkBtn = document.getElementById('bookmark-btn');
-        const metadataBtn = document.getElementById('metadata-btn');
-        const metadataModal = document.getElementById('metadata-modal');
-        const closeModal = document.querySelector('.close');
-        const cancelModal = document.querySelector('.btn.cancel');
-        const metadataForm = document.getElementById('metadata-form');
+        let imagesContainer;
+        let bookmarkBtn;
+        let metadataBtn;
+        let metadataModal;
+        let closeModal;
+        let cancelModal;
+        let metadataForm;
+        let imageCounter; // Image counter element
+        let currentImageElement; // Current image count element
+        let totalImagesElement; // Total images count element
         
-        // Initialize
-        document.addEventListener('DOMContentLoaded', function() {
-            // Check if we've loaded all images already
-            if ({{ images|length }} >= totalImages) {
-                hasMore = false;
-            }
-            
-            // Load bookmarks
-            loadBookmarks();
-            
-            // Load metadata
-            loadComicMetadata();
-            
-            // Set up event listeners
-            window.addEventListener('scroll', handleScroll);
-            bookmarkBtn.addEventListener('click', toggleBookmark);
-            metadataBtn.addEventListener('click', openMetadataModal);
-            closeModal.addEventListener('click', closeMetadataModal);
-            cancelModal.addEventListener('click', closeMetadataModal);
-            metadataForm.addEventListener('submit', saveMetadata);
-            
-            // Add event listener for toggle header button
-            const toggleHeaderBtn = document.getElementById('toggle-header-btn');
-            if (toggleHeaderBtn) {
-                toggleHeaderBtn.addEventListener('click', toggleHeader);
-            }
-            
-            // Close modal when clicking outside
-            window.addEventListener('click', function(event) {
-                if (event.target === metadataModal) {
-                    closeMetadataModal();
+        // Function to update image counter
+        function updateImageCounter() {
+            if (currentImageElement) {
+                currentImageElement.textContent = currentViewedImage;
+                // Add animation class and remove it after animation completes
+                if (imageCounter) {
+                    imageCounter.classList.add('updated');
+                    setTimeout(() => {
+                        imageCounter.classList.remove('updated');
+                    }, 500);
                 }
-            });
-        });
+            }
+        }
+        
+        // Function to update bookmark button state
+        function updateBookmarkButton() {
+            if (!bookmarkBtn) return;
+            
+            if (bookmarks && bookmarks['{{ comic_name }}']) {
+                bookmarkBtn.textContent = 'Bookmarked';
+                bookmarkBtn.classList.add('active');
+            } else {
+                bookmarkBtn.textContent = 'Bookmark';
+                bookmarkBtn.classList.remove('active');
+            }
+        }
+        
+        // Function to open metadata modal
+        function openMetadataModal() {
+            if (!metadataModal) return;
+            metadataModal.style.display = 'flex';
+        }
+        
+        // Function to close metadata modal
+        function closeMetadataModal() {
+            if (!metadataModal) return;
+            metadataModal.style.display = 'none';
+        }
+        
+        // Function to toggle header visibility
+        function toggleHeader() {
+            const header = document.querySelector('.header');
+            const toggleBtn = document.getElementById('toggle-header-btn');
+            
+            if (!header || !toggleBtn) return;
+            
+            if (header.style.display === 'none') {
+                // Show header
+                header.style.display = '';
+                toggleBtn.textContent = 'Hide Header';
+                toggleBtn.classList.remove('header-hidden');
+            } else {
+                // Hide header
+                header.style.display = 'none';
+                toggleBtn.textContent = 'Show Header';
+                toggleBtn.classList.add('header-hidden');
+            }
+        }
         
         // Load bookmarks from server
         function loadBookmarks() {
             fetch('/api/bookmarks')
-                .then(response => response.json())
+                .then(response => {
+                    if (!response.ok) {
+                        throw new Error(`HTTP error! status: ${response.status}`);
+                    }
+                    return response.json();
+                })
                 .then(data => {
                     bookmarks = data;
                     updateBookmarkButton();
@@ -287,38 +364,39 @@
         
         // Load comic metadata from server
         function loadComicMetadata() {
-            fetch(`/api/comic/{{ comic_name }}/metadata`)
-                .then(response => response.json())
+            fetch(`/api/comic/{{ comic_name | urlencode }}/metadata`)
+                .then(response => {
+                    if (!response.ok) {
+                        throw new Error(`HTTP error! status: ${response.status}`);
+                    }
+                    return response.json();
+                })
                 .then(data => {
                     comicMetadata = data;
                     // Populate form fields
-                    document.getElementById('title').value = data.title || '';
-                    document.getElementById('author').value = data.author || '';
-                    document.getElementById('tags').value = data.tags || '';
-                    document.getElementById('description').value = data.description || '';
+                    const titleEl = document.getElementById('title');
+                    const authorEl = document.getElementById('author');
+                    const tagsEl = document.getElementById('tags');
+                    const descriptionEl = document.getElementById('description');
+                    
+                    if (titleEl) titleEl.value = data.title || '';
+                    if (authorEl) authorEl.value = data.author || '';
+                    if (tagsEl) tagsEl.value = Array.isArray(data.tags) ? data.tags.join(', ') : data.tags || '';
+                    if (descriptionEl) descriptionEl.value = data.description || '';
                 })
                 .catch(error => {
                     console.error('Error loading metadata:', error);
                 });
         }
         
-        // Update bookmark button state
-        function updateBookmarkButton() {
-            if (bookmarks && bookmarks['{{ comic_name }}']) {
-                bookmarkBtn.textContent = 'Bookmarked';
-                bookmarkBtn.classList.add('active');
-            } else {
-                bookmarkBtn.textContent = 'Bookmark';
-                bookmarkBtn.classList.remove('active');
-            }
-        }
-        
         // Toggle bookmark for current comic
         function toggleBookmark() {
-            const isBookmarked = bookmarks && bookmarks['{{ comic_name }}'];
+            if (!bookmarks) return;
+            
+            const isBookmarked = bookmarks && bookmarks['{{ comic_name | urlencode }}'];
             
             const action = isBookmarked ? 'remove' : 'add';
-            const comicTitle = comicMetadata.title || '{{ comic_title }}';
+            const comicTitle = (comicMetadata && comicMetadata.title) || '{{ comic_title | tojson }}';
             
             // Save bookmark to server
             fetch('/api/bookmarks', {
@@ -327,19 +405,24 @@
                     'Content-Type': 'application/json'
                 },
                 body: JSON.stringify({
-                    comic_name: '{{ comic_name }}',
+                    comic_name: '{{ comic_name | urlencode }}',
                     comic_title: comicTitle,
                     action: action
                 })
             })
-            .then(response => response.json())
+            .then(response => {
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+                return response.json();
+            })
             .then(data => {
                 if (data.success) {
                     // Update local bookmarks state
                     if (isBookmarked) {
-                        delete bookmarks['{{ comic_name }}'];
+                        delete bookmarks['{{ comic_name | urlencode }}'];
                     } else {
-                        bookmarks['{{ comic_name }}'] = {
+                        bookmarks['{{ comic_name | urlencode }}'] = {
                             title: comicTitle,
                             timestamp: new Date().toISOString()
                         };
@@ -354,42 +437,46 @@
             });
         }
         
-        // Open metadata modal
-        function openMetadataModal() {
-            metadataModal.style.display = 'flex';
-        }
-        
-        // Close metadata modal
-        function closeMetadataModal() {
-            metadataModal.style.display = 'none';
-        }
-        
         // Save metadata
         function saveMetadata(event) {
             event.preventDefault();
             
+            const titleEl = document.getElementById('title');
+            const authorEl = document.getElementById('author');
+            const tagsEl = document.getElementById('tags');
+            const descriptionEl = document.getElementById('description');
+            
             const metadata = {
-                title: document.getElementById('title').value,
-                author: document.getElementById('author').value,
-                tags: document.getElementById('tags').value,
-                description: document.getElementById('description').value
+                title: titleEl ? titleEl.value : '',
+                author: authorEl ? authorEl.value : '',
+                tags: tagsEl ? tagsEl.value : '',
+                description: descriptionEl ? descriptionEl.value : ''
             };
             
-            fetch(`/api/comic/{{ comic_name }}/metadata`, {
+            fetch(`/api/comic/{{ comic_name | urlencode }}/metadata`, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json'
                 },
                 body: JSON.stringify(metadata)
             })
-            .then(response => response.json())
+            .then(response => {
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+                return response.json();
+            })
             .then(data => {
                 if (data.success) {
-                    closeMetadataModal();
+                    // Update local metadata
+                    comicMetadata = metadata;
+                    if (metadataModal) {
+                        metadataModal.style.display = 'none';
+                    }
                     // Reload page to show updated metadata
                     location.reload();
                 } else {
-                    console.error('Failed to save metadata');
+                    console.error('Failed to save metadata:', data.error);
                 }
             })
             .catch(error => {
@@ -401,6 +488,29 @@
         function handleScroll() {
             if (window.innerHeight + window.scrollY >= document.body.offsetHeight - 1000) {
                 loadMoreImages();
+            }
+            
+            // Update current viewed image based on scroll position
+            updateCurrentViewedImage();
+        }
+        
+        // Update which image is currently viewed based on scroll position
+        function updateCurrentViewedImage() {
+            if (!imagesContainer) return;
+            
+            const images = imagesContainer.querySelectorAll('.comic-image');
+            if (images.length === 0) return;
+            
+            // Find the image that is currently in view
+            for (let i = 0; i < images.length; i++) {
+                const rect = images[i].getBoundingClientRect();
+                // If image is in viewport (top is above bottom of screen and bottom is below top of screen)
+                if (rect.top <= window.innerHeight && rect.bottom >= 0) {
+                    // Update current viewed image (1-indexed)
+                    currentViewedImage = i + 1;
+                    updateImageCounter();
+                    break;
+                }
             }
         }
         
@@ -415,18 +525,25 @@
             const loadingDiv = document.createElement('div');
             loadingDiv.className = 'loading';
             loadingDiv.textContent = 'Loading more images...';
-            imagesContainer.appendChild(loadingDiv);
+            if (imagesContainer) imagesContainer.appendChild(loadingDiv);
             
-            fetch(`/api/comic/{{ comic_name }}/images?page=${currentPage}`)
-                .then(response => response.json())
+            fetch(`/api/comic/{{ comic_name | urlencode }}/images?page=${currentPage}`)
+                .then(response => {
+                    if (!response.ok) {
+                        throw new Error(`HTTP error! status: ${response.status}`);
+                    }
+                    return response.json();
+                })
                 .then(data => {
                     // Remove loading indicator
-                    imagesContainer.removeChild(loadingDiv);
+                    if (imagesContainer && loadingDiv.parentNode) {
+                        imagesContainer.removeChild(loadingDiv);
+                    }
                     
                     // Add new images
                     data.images.forEach(imageInfo => {
                         const img = document.createElement('img');
-                        img.src = `/comic/{{ comic_name }}/image/${imageInfo.filename}`;
+                        img.src = `/comics/{{ comic_name | urlencode }}/${imageInfo.filename}`;
                         img.alt = imageInfo.filename;
                         img.className = 'comic-image';
                         img.loading = 'lazy';
@@ -437,37 +554,130 @@
                             img.height = imageInfo.height;
                         }
                         
-                        imagesContainer.appendChild(img);
+                        if (imagesContainer) imagesContainer.appendChild(img);
                     });
+                    
+                    // Update current image count
+                    currentImageCount += data.images.length;
                     
                     hasMore = data.has_more;
                     isLoading = false;
                 })
                 .catch(error => {
                     // Remove loading indicator
-                    imagesContainer.removeChild(loadingDiv);
+                    if (imagesContainer && loadingDiv.parentNode) {
+                        imagesContainer.removeChild(loadingDiv);
+                    }
                     console.error('Error loading more images:', error);
                     isLoading = false;
                 });
         }
         
-        // Toggle header visibility
-        function toggleHeader() {
-            const header = document.querySelector('.header');
-            const toggleBtn = document.getElementById('toggle-header-btn');
+        // Load initial images
+        function loadInitialImages() {
+            if (isLoading || !hasMore) return;
             
-            if (header.style.display === 'none') {
-                // Show header
-                header.style.display = '';
-                toggleBtn.textContent = 'Hide Header';
-                toggleBtn.classList.remove('header-hidden');
-            } else {
-                // Hide header
-                header.style.display = 'none';
-                toggleBtn.textContent = 'Show Header';
-                toggleBtn.classList.add('header-hidden');
-            }
+            isLoading = true;
+            
+            fetch(`/api/comic/{{ comic_name | urlencode }}/images?page=1`)
+                .then(response => {
+                    if (!response.ok) {
+                        throw new Error(`HTTP error! status: ${response.status}`);
+                    }
+                    return response.json();
+                })
+                .then(data => {
+                    // Add initial images
+                    data.images.forEach(imageInfo => {
+                        const img = document.createElement('img');
+                        img.src = `/comics/{{ comic_name | urlencode }}/${imageInfo.filename}`;
+                        img.alt = imageInfo.filename;
+                        img.className = 'comic-image';
+                        img.loading = 'lazy';
+                        
+                        // Set image dimensions if available for better rendering performance
+                        if (imageInfo.width && imageInfo.height) {
+                            img.width = imageInfo.width;
+                            img.height = imageInfo.height;
+                        }
+                        
+                        if (imagesContainer) imagesContainer.appendChild(img);
+                    });
+                    
+                    // Update current image count
+                    currentImageCount = data.images.length;
+                    
+                    hasMore = data.has_more;
+                    isLoading = false;
+                    
+                    // Add scroll listener to update current viewed image
+                    window.addEventListener('scroll', updateCurrentViewedImage);
+                })
+                .catch(error => {
+                    console.error('Error loading initial images:', error);
+                    isLoading = false;
+                });
         }
+        
+        // Initialize
+        document.addEventListener('DOMContentLoaded', function() {
+            // Get DOM elements
+            imagesContainer = document.getElementById('images-container');
+            bookmarkBtn = document.getElementById('bookmark-btn');
+            metadataBtn = document.getElementById('metadata-btn');
+            metadataModal = document.getElementById('metadata-modal');
+            closeModal = document.querySelector('.close');
+            cancelModal = document.querySelector('.btn.cancel');
+            metadataForm = document.getElementById('metadata-form');
+            imageCounter = document.getElementById('image-counter');
+            currentImageElement = document.getElementById('current-image');
+            totalImagesElement = document.getElementById('total-images');
+            
+            // Load initial images
+            loadInitialImages();
+            
+            // Load bookmarks
+            loadBookmarks();
+            
+            // Load metadata
+            loadComicMetadata();
+            
+            // Set up event listeners
+            window.addEventListener('scroll', handleScroll);
+            
+            if (bookmarkBtn) {
+                bookmarkBtn.addEventListener('click', toggleBookmark);
+            }
+            
+            if (metadataBtn) {
+                metadataBtn.addEventListener('click', openMetadataModal);
+            }
+            
+            if (closeModal) {
+                closeModal.addEventListener('click', closeMetadataModal);
+            }
+            
+            if (cancelModal) {
+                cancelModal.addEventListener('click', closeMetadataModal);
+            }
+            
+            if (metadataForm) {
+                metadataForm.addEventListener('submit', saveMetadata);
+            }
+            
+            // Add event listener for toggle header button
+            const toggleHeaderBtn = document.getElementById('toggle-header-btn');
+            if (toggleHeaderBtn) {
+                toggleHeaderBtn.addEventListener('click', toggleHeader);
+            }
+            
+            // Close modal when clicking outside
+            window.addEventListener('click', function(event) {
+                if (metadataModal && event.target === metadataModal) {
+                    closeMetadataModal();
+                }
+            });
+        });
     </script>
 </body>
 </html>

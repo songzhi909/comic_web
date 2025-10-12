@@ -14,9 +14,11 @@ class Config:
         COMICS_DIR = os.path.join(EXE_DIR, 'comics')
     else:
         # Running in development (Python interpreter)
-        TEMPLATE_FOLDER = None  # Use Flask default
-        STATIC_FOLDER = None    # Use Flask default
+        # Use absolute paths for templates and static folders
+        BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        TEMPLATE_FOLDER = os.path.join(BASE_DIR, 'templates')
+        STATIC_FOLDER = os.path.join(BASE_DIR, 'static')
         # Comics directory is alongside the script file
-        COMICS_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'comics')
+        COMICS_DIR = os.path.join(BASE_DIR, 'comics')
     
     IMAGES_PER_LOAD = 20
