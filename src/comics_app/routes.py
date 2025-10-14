@@ -79,6 +79,14 @@ def create_app():
                 template_folder=Config.TEMPLATE_FOLDER,
                 static_folder=Config.STATIC_FOLDER)
     
+    # Configure Flask logging to respect our settings
+    # Set the level for werkzeug logger specifically to match our configuration
+    werkzeug_logger = logging.getLogger('werkzeug')
+    werkzeug_logger.setLevel(getattr(logging, Config.LOG_LEVEL))
+    
+    # Also configure Flask's built-in logger
+    app.logger.setLevel(getattr(logging, Config.LOG_LEVEL))
+    
     # Add secret key for session management
     app.secret_key = 'comic_web_secret_key_2025'
     
