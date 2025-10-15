@@ -209,6 +209,50 @@ def get_all_comics():
         logger.error(f"Error getting all comics: {str(e)}")
         return []
 
+def search_comics(query):
+    """Search comics by name, title, author or tags"""
+    try:
+        with get_db_connection() as conn:
+            # Search by name, title, author or tags
+            search_term = f"%{query}%"
+            cursor = conn.execute('''
+                SELECT name, title, author, tags, description, cover_image 
+                FROM comics 
+                WHERE name LIKE ? OR title LIKE ? OR author LIKE ? OR tags LIKE ?
+                ORDER BY name
+            ''', (search_term, search_term, search_term, search_term))
+            
+            comics = []
+            for row in cursor.fetchall():
+                # Skip hidden comics (starting with dot)
+                if row['name'].startswith('.'):
+                    continue
+                    
+                # Handle tags - ensure it's always a list
+                tags = row['tags']
+                if isinstance(tags, str):
+                    # Split string into list
+                    tags = tags.split(',') if tags else []
+                elif tags is None:
+                    # If None, make it an empty list
+                    tags = []
+                elif not isinstance(tags, list):
+                    # If it's something else, make it a list with one item
+                    tags = [str(tags)]
+                    
+                comics.append({
+                    'name': row['name'],
+                    'title': row['title'],
+                    'author': row['author'],
+                    'tags': tags,
+                    'description': row['description'],
+                    'cover_image': row['cover_image']
+                })
+            return comics
+    except Exception as e:
+        logger.error(f"Error searching comics: {str(e)}")
+        return []
+
 def save_bookmark(comic_name, comic_title):
     """Save a bookmark in database"""
     try:

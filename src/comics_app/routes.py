@@ -112,11 +112,17 @@ def create_app():
                 return render_template('login.html', error='Invalid username or password')
         
         # GET request - show login page
-        return render_template('login.html')
+        from config import Config
+        return render_template('login.html', enable_registration=Config.ENABLE_REGISTRATION)
     
     @app.route('/register', methods=['POST'])
     def register():
         """Handle user registration"""
+        # Check if registration is enabled
+        from config import Config
+        if not Config.ENABLE_REGISTRATION:
+            return render_template('login.html', error='Registration is disabled'), 403
+            
         username = request.form['username']
         password = request.form['password']
         confirm_password = request.form.get('confirm_password', '')
@@ -151,9 +157,50 @@ def create_app():
             return redirect(url_for('login'))
             
         try:
-            comics = get_all_comics()
+            # Check if there's a search query
+            search_query = request.args.get('search', '').strip()
+            
+            if search_query:
+                # Search comics based on query
+                from comics_app.database import search_comics
+                db_comics = search_comics(search_query)
+                
+                # Convert to Comic objects
+                comics = []
+                for db_comic in db_comics:
+                    # Skip hidden comics (starting with dot)
+                    if db_comic['name'].startswith('.'):
+                        continue
+                        
+                    # Handle tags - could be string, list, or None
+                    tags = db_comic['tags']
+                    if isinstance(tags, str):
+                        # Split string into list
+                        tags = tags.split(',') if tags else []
+                    elif tags is None:
+                        # If None, make it an empty list
+                        tags = []
+                    elif not isinstance(tags, list):
+                        # If it's something else, make it a list with one item
+                        tags = [str(tags)]
+                        
+                    comic = Comic(
+                        name=db_comic['name'],
+                        cover_image=db_comic['cover_image'],
+                        metadata={
+                            'title': db_comic['title'],
+                            'author': db_comic['author'],
+                            'tags': tags,
+                            'description': db_comic['description']
+                        }
+                    )
+                    comics.append(comic)
+            else:
+                # Get all comics
+                comics = get_all_comics()
+                
             user = session['user']
-            return render_template('index.html', comics=comics, user=user)
+            return render_template('index.html', comics=comics, user=user, search_query=search_query)
         except Exception as e:
             logger.error(f"Error loading comics: {e}")
             return render_template('error.html', error="Failed to load comics"), 500
