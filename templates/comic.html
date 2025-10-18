@@ -548,8 +548,11 @@
                     if (metadataModal) {
                         metadataModal.style.display = 'none';
                     }
-                    // Reload page to show updated metadata
-                    location.reload();
+                    // Instead of reloading the page, update the comic title if it has changed
+                    const comicTitleElement = document.querySelector('.comic-title');
+                    if (comicTitleElement && metadata.title) {
+                        comicTitleElement.textContent = metadata.title;
+                    }
                 } else {
                     console.error('Failed to save metadata:', data.error);
                 }

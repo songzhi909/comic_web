@@ -337,7 +337,7 @@
                     <a href="{{ url_for('comic', name=comic.name) }}" class="card-link">
                         <div class="comic-cover-container">
                             {% if comic.cover_image %}
-                            <img src="{{ url_for('comic_cover', name=comic.name) }}" alt="{{ comic.name }} 封面" class="comic-cover" onerror="this.src='{{ url_for('static', filename='placeholder.png') }}'">
+                            <img src="{{ url_for('comic_cover_thumb', name=comic.name) }}" alt="{{ comic.name }} 封面" class="comic-cover" onerror="this.src='{{ url_for('static', filename='placeholder.png') }}'">
                             {% else %}
                             <div class="comic-cover" style="background-color: #ecf0f1; display: flex; align-items: center; justify-content: center; color: #95a5a6; font-size: 1.2rem;">
                                 暂无封面

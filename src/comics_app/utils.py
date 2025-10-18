@@ -99,9 +99,9 @@ def get_image_size(comics_dir, comic_name, filename):
     width, height = get_cached_image_size(comic_name, filename)
     if width is not None and height is not None:
         return width, height
-    
-    # If not in cache, calculate and store
+        
     try:
+        # If not in cache, calculate and cache
         image_path = os.path.join(comics_dir, comic_name, filename)
         with Image.open(image_path) as img:
             width, height = img.size
@@ -109,8 +109,32 @@ def get_image_size(comics_dir, comic_name, filename):
             cache_image_size(comic_name, filename, width, height)
             return width, height
     except Exception as e:
-        logger.warning(f"Could not get image size for {comic_name}/{filename}: {e}")
+        logger.error(f"Error getting image size for {comic_name}/{filename}: {e}")
         return None, None
+
+def create_thumbnail(comics_dir, comic_name, filename, thumbnail_size=(300, 300)):
+    """
+    Create a thumbnail for an image
+    """
+    try:
+        image_path = os.path.join(comics_dir, comic_name, filename)
+        with Image.open(image_path) as img:
+            # Convert to RGB if necessary (for PNGs with transparency)
+            if img.mode in ('RGBA', 'LA', 'P'):
+                img = img.convert('RGB')
+                
+            # Create thumbnail
+            img.thumbnail(thumbnail_size, Image.Resampling.LANCZOS)
+            
+            # Save to a bytes buffer
+            from io import BytesIO
+            buffer = BytesIO()
+            img.save(buffer, format='JPEG', quality=85, optimize=True)
+            buffer.seek(0)
+            return buffer
+    except Exception as e:
+        logger.error(f"Error creating thumbnail for {comic_name}/{filename}: {e}")
+        return None
 
 def search_comics(comics_dir, query):
     """

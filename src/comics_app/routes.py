@@ -296,6 +296,41 @@ def create_app():
             # Return placeholder on any error
             return send_from_directory(app.static_folder, 'placeholder.png')
     
+    @app.route('/comic/<name>/cover_thumb')
+    def comic_cover_thumb(name):
+        """Serve comic cover thumbnail"""
+        # Check if user is logged in
+        if 'user' not in session:
+            abort(403)
+            
+        # Security check - ensure the path is safe
+        if not is_path_safe(name):
+            logger.warning(f"Attempted access to unsafe path: {name}")
+            abort(404)
+            
+        try:
+            # Get the cover image for this comic
+            cover_image = get_comic_cover(Config.COMICS_DIR, name)
+            if cover_image:
+                # Create thumbnail
+                from comics_app.utils import create_thumbnail
+                thumbnail_buffer = create_thumbnail(Config.COMICS_DIR, name, cover_image)
+                
+                if thumbnail_buffer:
+                    # Return the thumbnail
+                    from flask import send_file
+                    return send_file(thumbnail_buffer, mimetype='image/jpeg')
+                else:
+                    # If thumbnail creation failed, return placeholder
+                    return send_from_directory(app.static_folder, 'placeholder.png')
+            else:
+                # If no cover image found, return placeholder
+                return send_from_directory(app.static_folder, 'placeholder.png')
+        except Exception as e:
+            logger.error(f"Error serving cover thumbnail for {name}: {e}")
+            # Return placeholder on any error
+            return send_from_directory(app.static_folder, 'placeholder.png')
+    
     @app.route('/api/comics')
     def api_comics():
         """API endpoint to get all comics as JSON"""

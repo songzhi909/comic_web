@@ -330,6 +330,9 @@ def sync_comics_with_db():
         # Find new comics that need to be added to database
         new_comics = [name for name in comic_dirs if name not in db_comic_names]
         
+        # Find comics that no longer exist and need to be removed from database
+        removed_comics = [name for name in db_comic_names if name not in comic_dirs]
+        
         # Add new comics to database
         for comic_name in new_comics:
             # Load existing metadata if it exists
@@ -359,6 +362,10 @@ def sync_comics_with_db():
                 except Exception as e:
                     logger.warning(f"Could not remove old metadata file for {comic_name}: {str(e)}")
         
+        # Remove deleted comics from database
+        for comic_name in removed_comics:
+            delete_comic(comic_name)
+        
         # Update existing comics without changing their cover images
         existing_comics = [name for name in comic_dirs if name in db_comic_names]
         for comic_name in existing_comics:
@@ -380,7 +387,7 @@ def sync_comics_with_db():
                 except Exception as e:
                     logger.error(f"Error loading metadata for {comic_name}: {str(e)}")
         
-        logger.info(f"Synced comics with database. Added {len(new_comics)} new comics.")
+        logger.info(f"Synced comics with database. Added {len(new_comics)} new comics, removed {len(removed_comics)} comics.")
         return new_comics
     except Exception as e:
         logger.error(f"Error syncing comics with database: {str(e)}")
@@ -434,4 +441,17 @@ def verify_user_password(username, password):
         return user['password_hash'] == password_hash
     except Exception as e:
         logger.error(f"Error verifying user password: {e}")
+        return False
+
+def delete_comic(comic_name):
+    """Delete a comic from database"""
+    try:
+        with get_db_connection() as conn:
+            # Delete the comic
+            conn.execute('DELETE FROM comics WHERE name = ?', (comic_name,))
+            conn.commit()
+            logger.info(f"Deleted comic from database: {comic_name}")
+            return True
+    except Exception as e:
+        logger.error(f"Error deleting comic {comic_name}: {str(e)}")
         return False
